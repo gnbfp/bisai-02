@@ -1,6 +1,6 @@
 """M1 输入解析 —— 作业书纯文本 → 作业元信息 + 评分点清单（LLM 调用点 1/3）。
 
-依据：requirements.md §6.0 / §6.1 / §7.5、docs/ARCHITECTURE.md §5、定稿文档 §3.2、
+依据：requirements.md §6.0 / §6.1 / §7.5、docs/ARCHITECTURE.md §5、
 D-03 / D-15 / D-21。
 
 LLM 只负责"生成"，下列判定全部在代码里（B8）：

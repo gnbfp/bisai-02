@@ -1,6 +1,6 @@
 """M3 任务拆解 —— 自检判定与 LLM 生成。
 
-依据：requirements.md §7.3 / §7.4、docs/ARCHITECTURE.md §6.2、定稿文档 §3.4、
+依据：requirements.md §7.3 / §7.4、docs/ARCHITECTURE.md §6.2、
 D-16 / D-18 / D-25。
 
 分工写死在这里（B8）：**LLM 只生成任务卡，判定权在 ``check()``（代码）**。
