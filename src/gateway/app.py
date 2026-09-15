@@ -59,7 +59,8 @@ __all__ = ["Gateway", "main"]
 _SEEN_LIMIT = 200
 
 # 单实例保护的守护端口（P0-E）：第二个进程 bind 不上就拒绝启动。
-INSTANCE_PORT = 47653
+# 用 GATEWAY_LOCK_PORT 覆盖：升级版与 MVP 要同时跑，必须各占一个端口（requirements-upgrade 第4节）。
+INSTANCE_PORT = int(os.environ.get("GATEWAY_LOCK_PORT", 47653))
 LOCK_FILE = "app.lock"
 
 

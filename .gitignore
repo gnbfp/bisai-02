@@ -25,3 +25,5 @@ Thumbs.db
 
 # M8 评测快照（含真实作业书原文，禁止入库 —— D-41 / D-51）
 eval/runs/
+
+data-upgrade/
