@@ -101,6 +101,7 @@
 - 单仓库（monorepo），不拆模块仓库。
 - 分支命名：`feat/<模块>-<内容>`、`fix/<内容>`。
 - 升级期的主线推到 `bisai`；`origin` 保持 MVP 原样。
+- **推送必须走代理**：本机 GitHub 直连会被墙（`github.com` 解析到 `20.205.243.166` 连不上，但 `api.github.com` 通）。本机代理 = `http://127.0.0.1:7897`，**已写入本仓库的 .git/config**（http.proxy）。若报 `Failed to connect to github.com port 443`，先确认代理软件在跑。
 - 不配 CI（周期太短），但 **PR / 提交记录要留** —— 交付物含源码，提交历史是分工的证据。
 - `.env`、`data/`、`eval/runs/`、`*.log` 已被 `.gitignore` 忽略，**永远不会入库**，别去改动这个设置。
 
@@ -136,4 +137,6 @@ python -m src.gateway.app
 
 # 推送升级版
 git -c safe.directory=D:/AI创新创业大赛 push bisai main
+# 万一代理配置丢失，内联补上：
+git -c safe.directory=D:/AI创新创业大赛 -c http.proxy=http://127.0.0.1:7897 push bisai main
 ```
