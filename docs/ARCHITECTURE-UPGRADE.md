@@ -105,11 +105,11 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 | `data-upgrade\`（进程根） | `index.json`、`app.lock` | 跨工作空间的东西只有两样：工作空间索引、单实例锁（锁必须是每进程一把，不能每群一把） |
 | `data-upgrade\workspaces\<群标识>\` | 现有 13 个文件（`assignment.json` `rubric.json` `cards.json` `preferences.json` `assignments.json` `proposals.json` `direction.json` `members.json` `state.json` `seen.json` `reminders.json` `report.md` `gantt.png`）+ `uploads\` + 新增 `changes.json` | 其余全部数据都是群内的，一个群一份 |
 
-**隔离杠杆**：`JsonStore(root)` 已经是"换个根就是换一个数据域"（`src/storage.py:74`）。所以工作空间隔离**不需要改 `storage.py`**，改动集中在 app 层："按消息选 root"（群消息取 `inbound.chat_id`；私聊见 §7）。
+**隔离杠杆**：`JsonStore(root)` 已经是"换个根就是换一个数据域"（`src/storage.py` 的 `JsonStore`）。所以工作空间隔离**不需要改 `storage.py`**，改动集中在 app 层："按消息选 root"（群消息取 `inbound.chat_id`；私聊见 §7）。
 
 ### 3.2 群标识与可读名
 
-- **key = 群的飞书 chat_id**（`oc_…`）。来源：`state.group_chat_id`（现状 `src/gateway/app.py:272` `_remember_group()` 写入），升级后由 app 层在选定 root 时确定。
+- **key = 群的飞书 chat_id**（`oc_…`）。来源：`state.group_chat_id`（现状 `src/gateway/app.py` `_remember_group()` 写入），升级后由 app 层在选定 root 时确定。
 - **可读名规则（本材料定）**：默认 `群<chat_id 尾 6 位>`；首份作业书解析成功后更新为 `<作业书标题>-<尾 6 位>`。例：演练得到 `课程任务书-02a033`。**不新增指令**（避免路由表继续膨胀）。
 - **可读名的落点（补 U2"出现在报告抬头"，v1.6）**：报告抬头与任务卡清单首行**复用现有 `source_title` 渲染位**（`allocation.render_task_list()` 首行、`report.md` 抬头），值改从 `index.workspaces[key].name` 取；**不新增字段、不改模板结构**。开工后验：抬头实际显示 `课程任务书-02a033` 这种可读名。
 - **防呆三动作的落点（补 U2"清空 / 重置 / 改名要二次确认"，v1.6）**：三者**本轮都不做机器人指令**（"不做改名"= P2 开关第 2 项），落点是**离线操作**：清空 / 重置 = 删 `data-upgrade\workspaces\<群>\` + 删 `index.json` 那条（即 §3.3 第 7 步的回退动作）；改名 = 改 `index.json` 的 `name` 字段。所以"二次确认 + 记录执行人"落在**操作手册（§3.3）**而不是路由表 —— 这是对 U2 的**收窄**，登记 §12.3 第 17 条。**PM 2026-09-16 认**，附三条件：① **手册 `docs\OPERATIONS-U2.md` 随 U2 一起交付**（现在不存在，不许当"已存在的落点"用）；② **执行人记录有落点** = `data-upgrade\maintenance.log`（JSON Lines 追加写：`{at, action, operator, workspace}`，**动手前先写** —— 记录在进程根，删工作空间目录删不掉它）；③ 排期与分工写进 §12.4 / §13。**约束（v1.8，PM 2026-09-16）**：把 `data-upgrade\` **整根清空**（连 `maintenance.log` 一起删）**不属于**这三动作，需**另行授权** —— 否则记录可以和动作一起消失。
@@ -121,7 +121,7 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 
 1. 停升级版进程（避免迁移中写入）。
 2. 备份：把 MVP `data\` 整份复制到 `data-upgrade\_migration\<时间戳>\`。
-3. 读 `data\state.json` 的 `group_chat_id`；**为空即中止**（无法判定归属，绝不猜）。**再加一道守卫（v1.7，依据 §3.6 诊断）**：把 `pending_file.chat_id` 与 `group_chat_id` 比对，**不一致就不迁 `pending_file`**（它只是 30 分钟缓存，`src/gateway/router.py:49`）并在 `MANIFEST` 记一行 —— 该文件在新工作空间里会被 `_pending_file()` 按会话拒绝（`src/gateway/router.py:391`），搬过去等于留个死缓存。
+3. 读 `data\state.json` 的 `group_chat_id`；**为空即中止**（无法判定归属，绝不猜）。**再加一道守卫（v1.7，依据 §3.6 诊断）**：把 `pending_file.chat_id` 与 `group_chat_id` 比对，**不一致就不迁 `pending_file`**（它只是 30 分钟缓存，`src/gateway/router.py` 的 `PENDING_FILE_TTL`）并在 `MANIFEST` 记一行 —— 该文件在新工作空间里会被 `_pending_file()` 按会话拒绝（`_pending_file()`，`src/gateway/router.py`），搬过去等于留个死缓存。
 4. 建 `data-upgrade\workspaces\<chat_id>\`，把现有文件（存在即复制）+ `uploads\` 复制进去。源目录**保持原样**。
 5. 写 `index.json`：`workspaces[chat_id] = {name, created_at, migrated_from}`；`user_last_group` 按 `members.json` 的 open_id 逐个填该 chat_id。
 6. 校验：逐文件哈希 + 用 `JsonStore` 读一遍 + 覆盖率复算与迁移前逐项相等。
@@ -159,10 +159,10 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 | `group_chat_id` / `preference.chat_id` | `oc_33225a17a5b9fdde00a70f92d002a033` | 16:22:54 |
 | `pending_file.chat_id` | `oc_6feb8f648197fd033b8de55a78f64d80` | 16:14:01 |
 
-- **事实 2 —— `oc_33225a17…` 是群**（可判定）：`group_chat_id` 只由 `_remember_group()` 写，而它**只处理 `chat_type == "group"`**（`src/gateway/app.py:279`）。
-- **事实 3 —— `oc_6feb8f64…` 的来源不可判定**（这条本身也是可复核结论）：全仓库 grep 只在 `data\state.json` 命中 **1 处**。`remember_file()` **不过滤会话类型**（`src/gateway/router.py:345-358` 直接存 `inbound.chat_id`）⇒ 它**可能是另一个群，也可能是某个人的私聊 chat_id**（D-42 ④ 定的演示路径正是"各自私聊投递"）。**不猜**：需要真人回忆 09-15 16:14 在哪个会话投的文件。
+- **事实 2 —— `oc_33225a17…` 是群**（可判定）：`group_chat_id` 只由 `_remember_group()` 写，而它**只处理 `chat_type == "group"`**。
+- **事实 3 —— `oc_6feb8f64…` 的来源不可判定**（这条本身也是可复核结论）：全仓库 grep 只在 `data\state.json` 命中 **1 处**。`remember_file()` **不过滤会话类型**（`remember_file()`（`src/gateway/router.py`） 直接存 `inbound.chat_id`）⇒ 它**可能是另一个群，也可能是某个人的私聊 chat_id**（D-42 ④ 定的演示路径正是"各自私聊投递"）。**不猜**：需要真人回忆 09-15 16:14 在哪个会话投的文件。
 - **事实 4 —— `data\` 至少见过 3 个会话**：`state.json.bak`（09-12 14:21 快照）里是 `oc_c02a3ec4c474400785e761cb495c9e2`；`state.json` 里同时并存 2 个 ⇒ **D-57「单群假设」在 MVP 盘上已被打破**（U2 要解决的正是这个）。
-- **它现在的性质是"死缓存"，不是"串数据"**：`_pending_file()` 按会话过滤（`src/gateway/router.py:391`：`pending["chat_id"] != inbound.chat_id` ⇒ 返回 `{}`），别的群配不上对；代价是它**不会被清理** —— TTL 只决定"算不算数"（`_stale_pending()` 不写盘，`src/gateway/router.py:396-404`）。
+- **它现在的性质是"死缓存"，不是"串数据"**：`_pending_file()` 按会话过滤（`_pending_file()` 里 `pending["chat_id"] != inbound.chat_id` ⇒ 返回 `{}`），别的群配不上对；代价是它**不会被清理** —— TTL 只决定"算不算数"（`_stale_pending()` 不写盘，`_stale_pending()`（`src/gateway/router.py`））。
 - **对 U2 的用途**：迁移第 3 步若单看 `group_chat_id`，会把这份别的会话的 `pending_file` 一起搬进新工作空间 ⇒ **§3.3 第 3 步已加守卫**（不一致就不迁 `pending_file`，记 `MANIFEST`）。
 
 ## 4. 触发层：@ 门禁 / 白名单播报 / 免 @ 窗口（审核 3，重点）
@@ -174,7 +174,7 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 ### 4.1 矩阵里必须显式写死的一格：文件消息（平台限制，不是漏测）
 
 - 飞书文件消息的内容体只有 `file_key` / `file_name`，**既无 text 字段、也无 @ 结构** ⇒「文字 + 附件 + @机器人」同条消息在飞书里做不出来（2026-09-15 实测确认）。
-- 这不是新发现：MVP 阶段已记为 **D-42**（`src/gateway/router.py:92` 注释：「文字和附件必然是两条消息」）。
+- 这不是新发现：MVP 阶段已记为 **D-42**（`src/gateway/router.py` 的 file 分支注释：「文字和附件必然是两条消息」）。
 - 因此 U1 的文件类指令口径（"@ 机器人 + `作业书` → 取本群最近一条未解析文件"）是**唯一可行形态**，不是实现偷懒。
 - **矩阵写法**：加一列"文件消息"——"无 @"格写"静默缓存"，"@ 功能词"格写「**不可复现（平台限制 · D-42）**」。
 
@@ -183,9 +183,9 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 
 | 资源类型 | 现状代码 | 现状行为 |
 |---|---|---|
-| `file` | `src/gateway/router.py:92-93`（先 `remember_file`） | 缓存 + **回** `FILE_RECEIVED`（`replies.py:87`） |
-| `image` | `src/gateway/router.py:97-98` | **回** `IMAGE_REJECTED`（`replies.py:89`）；**不入缓存**（D-45 ①，防"一张图把刚发来的 PDF 挤掉"） |
-| `audio` / `media` / `video` / `sticker` | `src/gateway/router.py:99-100` | 静默（现状就不回话） |
+| `file` | `route()` 的 `message_type == "file"` 分支（先 `remember_file`） | 缓存 + **回** `FILE_RECEIVED`（`replies.py`） |
+| `image` | `route()` 的 `message_type == "image"` 分支 | **回** `IMAGE_REJECTED`（`replies.py`）；**不入缓存**（D-45 ①，防"一张图把刚发来的 PDF 挤掉"） |
+| `audio` / `media` / `video` / `sticker` | `route()` 的其余资源类型分支（`audio` / `media` / `video` / `sticker`） | 静默（现状就不回话） |
 
 **升级版要求（U1 闭嘴纪律 + 两条投递路径的差别）**
 
@@ -202,7 +202,7 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 | 空闲 | 静默 | 静默 | 静默 | 兜底（见 §4.5 第 9 步 / §5.1 末行；§4.4 只讲白名单词表） | 执行 | **群里静默缓存**；私聊回话 | **群静默**；私聊回拒收（图片） | 不可复现（D-42） |
 | 投票中 | 静默 | **计票**（限开窗群 + 花名册成员） | **组长拍板** | 兜底 | 执行（不命中票就照走前缀，D-33） | 群里静默缓存 | 同上（资源分支在状态机**之前**，与窗口无关） | 不可复现 |
 | 投票已冻 | 静默 | 静默（数字不计票、不刷屏） | **组长指定**（同批候选上拍板） | 兜底 | 执行 | 群里静默缓存 | 同上 | 不可复现 |
-| 志愿窗口中 | 静默 | 私聊 = 填志愿；群内数字**不算志愿**（`preference.py:184-185` 明写"群里的裸数字一律不算"，D-54）⇒ 落到 `_by_prefix` 兜底回指令列表（`router.py:247`）；**升级后 = 门禁静默**（代码已定，无需实测） | **组长封盘**（结算） | 兜底 | 执行（封盘之外照走前缀） | 群里静默缓存 | 同上 | 不可复现 |
+| 志愿窗口中 | 静默 | 私聊 = 填志愿；群内数字**不算志愿**（`preference.accept()` 里明写"群里的裸数字一律不算"，D-54）⇒ 落到 `_by_prefix` 兜底回指令列表（`_by_prefix()` 兜底）；**升级后 = 门禁静默**（代码已定，无需实测） | **组长封盘**（结算） | 兜底 | 执行（封盘之外照走前缀） | 群里静默缓存 | 同上 | 不可复现 |
 | 登记中 | 静默（旁人）/ 发起人按 §4.4 登记行（`register.classify()`） | 同左 | 同左 | 同左 | 执行 | 群里静默缓存 | 同上 | 不可复现 |
 
 **四组口径注释**：
@@ -210,9 +210,9 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 - **资源列与状态无关**：`file` / `image` / 其他 4 类都在文本门禁**之前**分流（§4.5 的顺序图），所以整列不随状态变化。
 - "静默"分两种：**门禁静默**（U1 新增、只作用于文本）与**状态机静默**（现状已有：`register.classify()` 的 `"silent"`、非花名册成员不计数）。矩阵里两处都要能说清是哪一种。
 - 私聊**整列不套 @ 门禁**（L5）：私聊只有"状态机静默"这一种。
-- 群里文件消息**只缓存不回话**（§4.2 的必改项，现状 `src/gateway/router.py:92-93` 无条件回话）。
+- 群里文件消息**只缓存不回话**（§4.2 的必改项，现状 `route()` 的 `message_type == "file"` 分支 无条件回话）。
 
-**为什么单开一列而不是塞进"无 @ 文件消息"**：图片与文件走的是**同一个分流层**（`router.py:93` / `:97` / `:99`），但两者的"群内是否回话"在升级后**不同**（文件缓存、图片静默），合在一列会把两条规则写糊。另外 `@ + 图片` 与 `@ + 文件` 一样**不可复现**（图片消息同样没有 `text` 字段与 @ 结构，同 D-42 的平台限制）。
+**为什么单开一列而不是塞进"无 @ 文件消息"**：图片与文件走的是**同一个分流层**（`route()` 里三个资源分支：`file` / `image` / 其他），但两者的"群内是否回话"在升级后**不同**（文件缓存、图片静默），合在一列会把两条规则写糊。另外 `@ + 图片` 与 `@ + 文件` 一样**不可复现**（图片消息同样没有 `text` 字段与 @ 结构，同 D-42 的平台限制）。
 ### 4.4 白名单的机器可读定义
 
 **免 @ 词表（只在窗口内生效）**
@@ -226,7 +226,7 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 
 | 窗口 | TTL | 谁关 | 代码位置 |
 |---|---|---|---|
-| 方向投票 | 10 分钟（`VOTE_TTL`） | 过半自动落定 / 组长封盘 / **到期后任何消息都触发收口** | `src/gateway/vote.py:48`、`close_expired()`、`should_close()` |
+| 方向投票 | 10 分钟（`VOTE_TTL`） | 过半自动落定 / 组长封盘 / **到期后任何消息都触发收口** | `vote.py` 的 `VOTE_TTL`、`close_expired()`、`should_close()` |
 | 志愿窗口 | 5 小时（`PREFERENCE_TTL`） | 组长封盘 / 到期由下一条消息触发结算 | `src/gateway/preference.py` `read_window()` / `settle()` |
 | 登记 | 有 TTL（`_expired`） | 过期后**谁说话都能清掉**（判在发起人之前） | `src/gateway/register.py` `_expired()` |
 
@@ -246,10 +246,10 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 
 顺序（`router.route()` 内的实际层级，括号是现状行号）：
 
-1. `sender_type == "app"` → 静默（`router.py:89-90`，防自己回自己）
-2. `message_type == "file"` → 独立分支：群内静默缓存 / 私聊维持现状（`router.py:92-93`）
-3. `message_type == "image"` → 独立分支：群内静默 / 私聊回拒收（`router.py:97-98`）
-4. 其余资源类型（`audio` / `media` / `video` / `sticker`）→ 静默（`router.py:99-100`）
+1. `sender_type == "app"` → 静默（`route()` 开头的 `sender_type == "app"` 分支，防自己回自己）
+2. `message_type == "file"` → 独立分支：群内静默缓存 / 私聊维持现状
+3. `message_type == "image"` → 独立分支：群内静默 / 私聊回拒收
+4. 其余资源类型（`audio` / `media` / `video` / `sticker`）→ 静默
 5. **剥 @段**（文本消息内的第一步；组员 @ 的 `open_id` 只从这里取，D-34）
 6. **登记状态机接管**（`awaiting == "register"` → `register.classify()`）—— **必须排在 @ 门禁之前**，理由见下
 7. **文本消息：「@ 门禁」在这里判定**（新增；`chat_type == "p2p"` 直接跳过本步）→ 通过后才进入
@@ -265,11 +265,11 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 
 **缺口（v1.11 已补）**：`to_inbound()` 原来只取 `Mention(key, open_id, name)`（`src/gateway/events.py`），**没有"这个 @ 是不是机器人"这个字段**；探针已证明平台会送 `mentioned_type=bot`（证据文件 §2 第 4 条）。现已落 `Inbound.bot_mentioned: bool` + `Mention.is_bot`，判据**两个取或**：① 平台 `mentioned_type == "bot"`；② **兜底** `open_id == FEISHU_BOT_OPEN_ID`（平台没给字段时仍认得出；PM 2026-09-16 认，落点见 §4.6 与真源 §4）。**判据 ① 真机已验（2026-09-16）**：群里 `@机器人007 你好` 有回应，见 `docs/evidence/2026-09-16-u1-smoke-real-device.md`；**判据 ② 真机构造不出来**（平台不会漏发 `mentioned_type`），只留单测撑 —— 口径见 §4.6。
 
-**兜底同步改**：`_by_prefix()` 末尾现在**无条件**回指令列表（`src/gateway/router.py:247`）⇒ 升级后只在**被 @ 时**才回。
+**兜底同步改**：`_by_prefix()` 末尾现在**无条件**回指令列表（`_by_prefix()` 末尾的兜底）⇒ 升级后只在**被 @ 时**才回。
 ### 4.6 未验证
 
-- [x] **矩阵穿透实测（真机，2026-09-16）**：7 条跑通 —— 群 `@` 文本 → 响应 / 群不 `@` 文本 → 静默 / 群不 `@` 指令 → 静默 / 群文件 → 静默 + 缓存 / 群 `@` 指令 → 执行出评分点 / 私聊文件 → 回执 / 私聊指令 → 执行。原样日志与落盘见 `docs/evidence/2026-09-16-u1-smoke-real-device.md`
-- [ ] **矩阵未覆盖的格（真机）**：图片消息（群静默 / 私聊拒收）、投票窗 × 群内裸数字、投票中 `@` 作业书 —— 同份证据文件 §4
+- [x] **矩阵穿透实测（真机，2026-09-16）**：**6 格跑通（①–⑥）** —— ① 群 `@` 文本 → 响应 / ② 群不 `@` 文本 → 静默 / ③ 群文件 → 静默 + 缓存 / ④ 群 `@` 指令 → 执行出评分点 / ⑤ 群不 `@` 指令 → 静默 / ⑥ 私聊文件 + `作业书` → 回执 → 出评分点。**⑥ 里含两个动作（私聊回执 + 私聊出评分点）⇒ 动作总数 7** —— 与证据文件 §2 的 6 行一一对应。**引用目标 = 证据文件里的逐字原文**（`docs/evidence/2026-09-16-u1-smoke-real-device.md` §1–§2：原样日志第 9–23 行；剔除的只有启动横幅 / 两条依赖 warning / 带 `access_key`·`ticket` 的连接行 / 退出行），**不是 `%TEMP%\u1_smoke.log` 那份**（会被系统清理）
+- [ ] **矩阵未覆盖的格（真机）**：图片消息（群静默 / 私聊拒收）、投票窗 × 群内裸数字、投票中 `@` 作业书 —— 同份证据文件 §4；**这三格已拆成可照着发的清单**：`docs\REHEARSAL-0918.md` §1（**必须赶在 U2 动 `data-upgrade\` 之前验** —— 隔离一落地，这份单工作空间的日志就复现不出来了）
 - [x] **判据 ①（平台 `mentioned_type == "bot"`）真机已验（2026-09-16）**：群里 `@机器人007` 认得出，原样日志见 `docs/evidence/2026-09-16-u1-smoke-real-device.md`。**那次两条判据同时配着，日志分不出是哪条命中**（要单验 ① 得临时清空 `FEISHU_BOT_OPEN_ID` 再发一条 —— 可选，不为它再开机）
 - [ ] **判据 ②（兜底 `open_id == FEISHU_BOT_OPEN_ID`）只有单测、真机无法构造**：平台正常都会带 `mentioned_type`，造不出「字段缺失但 `open_id` 命中」的真机消息 ⇒ 只有 `src/gateway/events.py:_is_bot_mention()` 的两条单测撑着（`test_to_inbound_falls_back_to_the_bot_open_id` / `test_the_bot_open_id_fallback_does_not_match_other_people`）。**保留为兜底，不计入真机覆盖**
 - 两条判据**取或**；**认不出来仍当没 @**（偏保守：漏判少回一句，误判会乱插嘴）
@@ -309,7 +309,7 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 - 解析：`我们要做的方向是：` + 正文 → 正文为空则回提示（照 `PROPOSAL_EMPTY` 的形态）；正文长度上限见 §11 的长度纪律。
 - **归并**：与现有候选做**代码判定**的相似度比对（归一化后子串 / 编辑距离阈值），命中就回"这跟候选 B 差不多，我按 B 记了"。**不烧 LLM**（B2 的调用点已经要从 3 增到 4，不再往上加）。
 - **两条硬口径（出处 = `requirements-upgrade.md` §2 U6 末两条）**：① **覆盖已经定过的方向要组长确认**（任何群成员都能**首次**落定；改已定方向只有组长能拍，非组长发来 → 回"这得组长来定"，不落盘、不覆盖）；② **已出的任务卡不自动重拆** —— 是否重拆**由人决定**（理由同 D-68：重拆会让 M8 基线与门③复算作废）。
-- 落盘：`direction.json` 覆盖写（现状 `JsonStore.save_direction()`，`src/storage.py:228`），并**追加**方向台账字段：`source="human"`、`decided_by`、`decided_at`。**与匿名提议严格分开**：`我想提议：` 走 `proposals.json`（匿名、留真实 user_id 只在盘上），拍板方向是**署名**且进 `direction.json`（D-74）。**已落地（v1.9）**：payload 实落 `source="human"` / `decided_by=<open_id>` / `decided_at` / `reason="人工拍板"`；归并用**代码判定**（归一化后 ①互相包含、短的一方 ≥4 字 或 ②`difflib` 相似度 ≥0.6），正例"校园二手交易平台"命中候选、反例"做个食堂排队小程序"不命中（`tests/test_vote.py` 的 U6 段）。`source` 字段一并落到投票 / 组长两条路径（`vote` / `leader`），台账三类来源可区分。
+- 落盘：`direction.json` 覆盖写（现状 `JsonStore.save_direction()`），并**追加**方向台账字段：`source="human"`、`decided_by`、`decided_at`。**与匿名提议严格分开**：`我想提议：` 走 `proposals.json`（匿名、留真实 user_id 只在盘上），拍板方向是**署名**且进 `direction.json`（D-74）。**已落地（v1.9）**：payload 实落 `source="human"` / `decided_by=<open_id>` / `decided_at` / `reason="人工拍板"`；归并用**代码判定**（归一化后 ①互相包含、短的一方 ≥4 字 或 ②`difflib` 相似度 ≥0.6），正例"校园二手交易平台"命中候选、反例"做个食堂排队小程序"不命中（`tests/test_vote.py` 的 U6 段）。`source` 字段一并落到投票 / 组长两条路径（`vote` / `leader`），台账三类来源可区分。
 
 ### 5.4 未验证
 
@@ -320,10 +320,10 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 ## 6. 智能层双链路（审核 5，重点）
 ### 6.1 分支判定点（唯一一处）
 
-**总开关 = 是否存在 ≥1 条 `status="normal"` 的评分点**（**不是**"`points` 列表是否为空"；与 §6.5 的裁决是**同一把尺子**）。`status` 只有两个取值（`src/models.py:37` `RUBRIC_STATUS = ("normal", "ambiguous")`）⇒ **"列表非空但一条 `normal` 都没有"是真实可达形态**（现网 5 条里就有 1 条 `ambiguous`，见 §3.4），必须显式归入无评分点链路。M1 侧的另一半判据：`src/intelligence/parse.py` 的 `_validate_points()` 明确允许 `rubric` 为**空数组**（D-48 口径，代码注释在 `_validate_points`），到 app 层落在这一行：
+**总开关 = 是否存在 ≥1 条 `status="normal"` 的评分点**（**不是**"`points` 列表是否为空"；与 §6.5 的裁决是**同一把尺子**）。`status` 只有两个取值（`RUBRIC_STATUS = ("normal", "ambiguous")`（`src/models.py`））⇒ **"列表非空但一条 `normal` 都没有"是真实可达形态**（现网 5 条里就有 1 条 `ambiguous`，见 §3.4），必须显式归入无评分点链路。M1 侧的另一半判据：`src/intelligence/parse.py` 的 `_validate_points()` 明确允许 `rubric` 为**空数组**（D-48 口径，代码注释在 `_validate_points`），到 app 层落在这一行：
 
 ```python
-# src/gateway/app.py:402（_run_assignment() 内；函数自 392 起）
+ # src/gateway/app.py 的 _run_assignment()
 if not parsed.points:
     self._send(reply(inbound, replies.NO_RUBRIC_FOUND))
     return                      # 现状：不跑 M3、一个字都不落盘（D-49 ②）
@@ -339,7 +339,7 @@ if not normal:        # 空列表 / 全是 ambiguous —— 都走无评分点�
     ...
 ```
 
-**为什么不能只判 `not parsed.points`**：全是 `ambiguous` 时 `points` 非空、分母却是 0，现网出口（`src/gateway/app.py:437-442`）的 f-string 会打出 `覆盖率 0/0` —— 与"真的 0% 覆盖"在文本上**不可区分**，正好撞上 `requirements-upgrade.md` §8 第 5 条②"要能区分**不计算**与**算出来是 0**"。
+**为什么不能只判 `not parsed.points`**：全是 `ambiguous` 时 `points` 非空、分母却是 0，现网出口（`_run_decompose()` 那条回话的 f-string） 会打出 `覆盖率 0/0` —— 与"真的 0% 覆盖"在文本上**不可区分**，正好撞上 `requirements-upgrade.md` §8 第 5 条②"要能区分**不计算**与**算出来是 0**"。
 
 ### 6.2 两条平行链路
 
@@ -347,8 +347,8 @@ if not normal:        # 空列表 / 全是 ambiguous —— 都走无评分点�
 |---|---|---|
 | 入口条件 | **存在 ≥1 条** `status="normal"`（分母 > 0） | **不存在**任何 `status="normal"`（含 `points` 为空、以及"列表非空但全是 `ambiguous`"） |
 | 硬指标 | **覆盖率**：分母 = `status="normal"` 的 id 集合 | **工作量分布**：不出覆盖率 |
-| 取数代码 | `src/intelligence/coverage.py:86` `coverage_loop()` | 新增，**不得复用 `coverage_loop()`** |
-| 溯源字段 | `rubric_refs`（必填非空，`src/models.py:161-167` 的 `TaskCard.validate()` 硬校验） | `source_refs`（新增，见 6.4） |
+| 取数代码 | `coverage_loop()`（`src/intelligence/coverage.py`） | 新增，**不得复用 `coverage_loop()`** |
+| 溯源字段 | `rubric_refs`（必填非空，`TaskCard.validate()` 硬校验） | `source_refs`（新增，见 6.4） |
 | 报告形态 | 现有核对清单 + 覆盖率数字 | 工作量分布（新模板） |
 
 **红线（可机械检查）**：无评分点链路的任何代码路径都**不许调用** `coverage_loop()`，也不许新增或调用任何其他覆盖率取数（`balance_loop()` 是工时均衡、不是覆盖率，允许），也不许往 `rubric.json` 里写"凑数的评分点"。写一个字都要拦。
@@ -357,14 +357,14 @@ if not normal:        # 空列表 / 全是 ambiguous —— 都走无评分点�
 
 | # | 证据 | 状态 |
 |---|---|---|
-| ① | 分母取数来源 = `{p.id for p in rubric if p.status == "normal"}`，位置 `src/intelligence/coverage.py:86-90`；报告值出口 `src/gateway/app.py:437`（拆解）与 `src/report/checklist.py` | **已有**（代码位置） |
+| ① | 分母取数来源 = `{p.id for p in rubric if p.status == "normal"}`，位置 = `coverage_loop()`（分母 = `status == "normal"` 的可拆评分点）；报告值出口 = `_run_decompose()` 那条回话（拆解）与 `src/report/checklist.py` | **已有**（代码位置） |
 | ② | 无评分点跑完的分子/分母实测 | **未验证**（开工后）：要求能区分"不计算"与"算出来是 0"，且报告模板该位置不被"工作量分布"顶替 |
 | ③ | 改造前后 T12 覆盖率两组数字 | **未验证**（开工后）：同一份作业书 + 同一份人工基线，必须**逐位一致**。今天已落一个基线：rubric 5 条 / normal 4 条 ⇒ 分母 4、分子 4（见 §3.4 与证据文件 §3） |
 | ④ | 混合作业的裁决 | **PM 已裁决**（见 6.5；口径 = §12.3 第 11 条） |
 
 ### 6.4 溯源字段怎么落（**数据模型变更，需拍板**）
 
-现状 `TaskCard.rubric_refs` 是**必填非空**（`src/models.py:161-167` `TaskCard.validate()` 直接抛 `SchemaError`）。无评分点链路塞不满它。三个选项：
+现状 `TaskCard.rubric_refs` 是**必填非空**（`TaskCard.validate()`（`src/models.py`） 直接抛 `SchemaError`）。无评分点链路塞不满它。三个选项：
 
 - (a) **新增可选字段 `source_refs: list[str]`（原文段落引用 + 估算依据），并放宽 `rubric_refs` 允许空** —— 采用，但**分链路校验**：有评分点链路仍必须非空（T02 的溯源硬校验不能松）。
 - (b) 拿 `rubric_refs` 装"工作量点 id" —— **否决**：那等于伪造评分点，覆盖率口径会被污染（D-63 ②的同类错误）。
@@ -385,7 +385,7 @@ if not normal:        # 空列表 / 全是 ambiguous —— 都走无评分点�
 
 ### 6.6 其他落点
 
-- 工作量字段**复用现成的** `TaskCard.effort_hours`（地板 `EFFORT_HOURS_FLOOR = 0.5`，`src/models.py:40`）—— 不新增字段就能表达"工作量估算"。
+- 工作量字段**复用现成的** `TaskCard.effort_hours`（地板 `EFFORT_HOURS_FLOOR = 0.5`，`src/models.py`）—— 不新增字段就能表达"工作量估算"。
 - LLM 调用点**从 3 处变 4 处**（新增无评分点拆解）：这是 §12 要登记的口径变更（B2 的"只用 3 处"被突破）。
 - 估算呈现口径（L2）：一律"参考值、可调整"；报告抬头写"工作量估算（可改）"，不写"建议分配"。
 ## 7. 私聊归属（审核 6）
@@ -401,13 +401,13 @@ if not normal:        # 空列表 / 全是 ambiguous —— 都走无评分点�
 | 该用户从没在群里互动过 | 回现有文案 `replies.NEED_GROUP`（"我还没认下群…"），**不落盘、不起 pipeline** |
 | 用户在群里，但不在该群花名册里 | 现状已有文案（`PREFERENCE_NOT_MEMBER` / `PROPOSAL_NOT_MEMBER`），沿用 |
 
-- **绑定规则 = 最近一次群内互动**：任何**真实用户**的群消息都刷新 `user_last_group[sender_open_id] = chat_id`。现状 `_remember_group()`（`src/gateway/app.py:272`）已经在做同样的判断（机器人自己的消息不算、值没变不写盘），升级后只是把落点从 `state` 挪到 `index.json`。
+- **绑定规则 = 最近一次群内互动**：任何**真实用户**的群消息都刷新 `user_last_group[sender_open_id] = chat_id`。现状 `_remember_group()`（`src/gateway/app.py`）已经在做同样的判断（机器人自己的消息不算、值没变不写盘），升级后只是把落点从 `state` 挪到 `index.json`。
 - **为什么不需要"你是哪个组的？"反问**：因为 **L4 = 一个群一份作业**（用户 2026-09-15 拍板），所以一个用户在同一时刻只可能有一个"最近活跃工作空间"，单值映射天然无歧义。反问只在 `awaiting` 类状态里才有价值，而私聊指令（填志愿 / 提议 / 完成）都是**无状态**的即时指令 —— 多一个状态机就多一处能把人卡住的地方（register 的教训：`register.classify()` 的"旁人静默"逻辑就是为了不让状态机吞指令）。
-- **用户如何发现自己"进了别的组"**：回话里本来就点明来源 —— `allocation.render_task_list()` 的首行是"当前任务卡来自《X》"（P1-E，`src/gateway/allocation.py:88`）。归属错了，标题就不对，用户回群里发一句指令即可纠正（群消息天然带 chat_id，零歧义）。
+- **用户如何发现自己"进了别的组"**：回话里本来就点明来源 —— `allocation.render_task_list()` 的首行是"当前任务卡来自《X》"（P1-E，`render_task_list()` 的首行）。归属错了，标题就不对，用户回群里发一句指令即可纠正（群消息天然带 chat_id，零歧义）。
 
 ### 7.3 落点与代价
 
-- `index.json` 会成为**全局热点**（每条群消息都可能写一次）。两层防：`JsonStore.mutate_raw()` 的进程级锁（`src/storage.py:114`）+ "值没变不写盘"（照抄 `_remember_group()` 的现成判断）。
+- `index.json` 会成为**全局热点**（每条群消息都可能写一次）。两层防：`JsonStore.mutate_raw()` 的进程级锁+ "值没变不写盘"（照抄 `_remember_group()` 的现成判断）。
 - 私聊指令的**花名册校验不变**：绑定只决定"去哪个工作空间找花名册"，不改变"非成员不给办事"的既有口径（D-53 / D-61 ②）。
 
 ### 7.4 未验证
@@ -444,20 +444,20 @@ if not normal:        # 空列表 / 全是 ambiguous —— 都走无评分点�
 
 与 `proposals.json` / `direction.json` 的区别：那两个"文档没定义字段所以走裸 JSON"，这个**有明确定义**，所以定型 + 校验（`AssignmentRecord.validate()` 的同类做法）。
 
-**跨文件原子性（v1.6 补）**：一次变更要改两处 —— `assignments.json`（`assignee`）+ `changes.json`（台账），外加一次群公示。`mutate_many()` 只保证**单文件**的原子读-改-写（`src/storage.py:125`），两个文件之间**不是事务**。
+**跨文件原子性（v1.6 补）**：一次变更要改两处 —— `assignments.json`（`assignee`）+ `changes.json`（台账），外加一次群公示。`mutate_many()` 只保证**单文件**的原子读-改-写，两个文件之间**不是事务**。
 
 - **写序**：先写 `changes.json`（意图日志，只追加），再写 `assignments.json`（状态）。崩溃夹在中间时，重放 `changes.json` 即可收敛 —— 台账是"意图"的真源。
-- **认领竞态**（两人同时 `我想接 T3`）：终局判据 = `assignee` 是否为空；读-改-写必须在**同一次** `mutate_many()` 里完成，先到者写入非空 `assignee`，后到者读到非空即回 §9.1 第 16 条那句。**串行口径（v1.8 收窄；原句"现网单进程串行收消息"过宽）**：串行只发生在**回调线程内** —— 后台 pipeline 线程（`src/gateway/app.py:191-193`）与提醒扫描线程（`src/gateway/app.py:589`）**也在写盘**，只是不写 `assignments.json`。`assignments.json` 的三个写者（M4 结算 / M6 完成标记 / U4 变更）**都在回调线程** ⇒ 交错是**时序**问题，不是并发问题。真正的交错点 = **结算与认领之间**（§8.4 的 `allocate()` 语义改动正是为这个）。
-- **待改点（v1.8，PM 2026-09-16 采纳）**：**结算也走 `mutate_many()` 条件写** —— 只改 `assignee` 为空的卡 / 只新增卡，不整份覆盖。`_save_assignments()`（`src/gateway/app.py:300-315`，docstring 自己写着"整份分配结果一次性覆盖"）是这条链上**唯一没有读-改-写保护**的地方。配套回归项见 §12.4 / §12.5 与 §13。**本轮（v1.9，U1 / U5 / U6）一个字都没动**：三条升级指令里只有 U6 落 `direction.json`，U1 / U5 不写 `assignments.json` ⇒ 这条待改点**仍是待改**（U4 的前置），**不要在 U4 之前依赖 `_save_assignments()` 的整份覆盖语义**。
+- **认领竞态**（两人同时 `我想接 T3`）：终局判据 = `assignee` 是否为空；读-改-写必须在**同一次** `mutate_many()` 里完成，先到者写入非空 `assignee`，后到者读到非空即回 §9.1 第 16 条那句。**串行口径（v1.8 收窄；原句"现网单进程串行收消息"过宽）**：串行只发生在**回调线程内** —— 后台 pipeline 线程（`handle()` 起的 `run_pipeline` 线程）与提醒扫描线程（`start_reminder_loop()` 里的 `_loop`）**也在写盘**，只是不写 `assignments.json`。`assignments.json` 的三个写者（M4 结算 / M6 完成标记 / U4 变更）**都在回调线程** ⇒ 交错是**时序**问题，不是并发问题。真正的交错点 = **结算与认领之间**（§8.4 的 `allocate()` 语义改动正是为这个）。
+- **待改点（v1.8，PM 2026-09-16 采纳）**：**结算也走 `mutate_many()` 条件写** —— 只改 `assignee` 为空的卡 / 只新增卡，不整份覆盖。`_save_assignments()`（`Gateway._save_assignments()`，docstring 自己写着"整份分配结果一次性覆盖"）是这条链上**唯一没有读-改-写保护**的地方。配套回归项见 §12.4 / §12.5 与 §13。**本轮（v1.9，U1 / U5 / U6）一个字都没动**：三条升级指令里只有 U6 落 `direction.json`，U1 / U5 不写 `assignments.json` ⇒ 这条待改点**仍是待改**（U4 的前置），**不要在 U4 之前依赖 `_save_assignments()` 的整份覆盖语义**。
 - 两条都**未验证**，见 §8.6。
 
 ### 8.3 回流池：不新增文件
 
-**"待认领"就是 `assignments.json` 里 `assignee == ""` 的那条记录。** `AssignmentRecord.validate()`（`src/models.py:206-211`）只校验 `source` 取值，不校验 `assignee` 非空 ⇒ 结构上已经能表达。收益：少一个数据文件、少一处同步点；代价：报告与清单要把空负责人渲染成"待认领"（`src/gateway/allocation.py:103` `render_board()` 要改）。
+**"待认领"就是 `assignments.json` 里 `assignee == ""` 的那条记录。** `AssignmentRecord.validate()`（`src/models.py`）只校验 `source` 取值，不校验 `assignee` 非空 ⇒ 结构上已经能表达。收益：少一个数据文件、少一处同步点；代价：报告与清单要把空负责人渲染成"待认领"（`render_board()`（`src/gateway/allocation.py`）要改）。
 
 ### 8.4 与兜底分配的关系（**本节最关键的一条**）
 
-现状：`preference.settle()` → `allocation.allocate()`（纯函数）→ 整份覆盖写 `assignments.json`（`src/gateway/app.py:300` `_save_assignments()`，只在 `assignee` 未变时合并 `completed_at`，D-67）。
+现状：`preference.settle()` → `allocation.allocate()`（纯函数）→ 整份覆盖写 `assignments.json`（`Gateway._save_assignments()`，只在 `assignee` 未变时合并 `completed_at`，D-67）。
 
 **风险**：结算会重算所有卡 ⇒ 人工改派、退出、认领的结果**会被下一次结算冲掉**。
 
@@ -472,7 +472,7 @@ if not normal:        # 空列表 / 全是 ambiguous —— 都走无评分点�
 | 需要的能力 | 现成的东西 | 代码位置 |
 |---|---|---|
 | 幂等（重复标记不覆盖） | M6 完成标记的做法 | `src/gateway/complete.py` |
-| 原子读-改-写（并发安全） | `mutate_many()` / `mutate_raw()` | `src/storage.py:125` / `:114` |
+| 原子读-改-写（并发安全） | `mutate_many()` / `mutate_raw()` | `src/storage.py` 的 `mutate_many()` / `mutate_raw()` |
 | 二次确认的形态（**留档：B 方案已被 PM 裁否，仅作形态参考**） | 登记的两步确认 | `src/gateway/register.py` |
 | 非成员不给办事 | M4/M5 的既有口径 | `PREFERENCE_NOT_MEMBER` / `PROPOSAL_NOT_MEMBER` |
 
@@ -487,9 +487,9 @@ if not normal:        # 空列表 / 全是 ambiguous —— 都走无评分点�
 ### 9.1 失败路径总表（行为 + 代码位置 + 升级后话术口径）
 | # | 失败 | 现状行为 / 代码位置 | 升级后行为 | 话术口径（自然语言 + 事实不润色） |
 |---|---|---|---|---|
-| 1 | 只 @，没带文本 | 剥 @段后为空 → **静默**（`src/gateway/router.py:102-104`：`if not text: return Outcome()`。**回能力清单是升级后的行为**，不是现状 —— v1.5 这里写反了） | 回**群内可用的能力清单**（条数由前缀表按作用域派生，**当前派生 = 群 7**；§11.3 / §5.1 落地进度）+ 一句"直接说要做什么就行" | 清单允许，但去掉"我只会这几件事"的机械感 |
+| 1 | 只 @，没带文本 | 剥 @段后为空 → **静默**（`route()` 里 `if not text: return Outcome()`。**回能力清单是升级后的行为**，不是现状 —— v1.5 这里写反了） | 回**群内可用的能力清单**（条数由前缀表按作用域派生，**当前派生 = 群 7**；§11.3 / §5.1 落地进度）+ 一句"直接说要做什么就行" | 清单允许，但去掉"我只会这几件事"的机械感 |
 | 2 | @ 了但词不认识 | 同上（只会给清单） | **三级**：近似能对上 → 先确认"你是想做 X 吗"；对不上 → 清单 + 一个最接近的候选；真没有 → 直说做不到 | 第 1 级必须**不执行**，只确认 |
-| 3 | **图片消息** | **无条件回** `IMAGE_REJECTED`（`router.py:97-98`；D-45 ①，用户 2026-09-12 拍板"不再静默"） | **群：静默**（本轮口径改写，见 §12.3 第 13 条）；**私聊：保留拒收回执** | 私聊话术沿用（已经是人话） |
+| 3 | **图片消息** | **无条件回** `IMAGE_REJECTED`（`route()` 的 `message_type == "image"` 分支；D-45 ①，用户 2026-09-12 拍板"不再静默"） | **群：静默**（本轮口径改写，见 §12.3 第 13 条）；**私聊：保留拒收回执** | 私聊话术沿用（已经是人话） |
 | 4 | `作业书` 但没文件 | `FILE_MISSING`（`router._pending_file()`：同会话 + 30 分钟 TTL，D-46 / D-47） | 同左 + 补一句"把作业书发进这个群，再 @我一次"（**v1.11 已落地**：群版走 `replies.file_missing(scope)`，真机日志见证据文件） | 保留"重试路径"，不要只说"没有" |
 | 5 | 文件解析失败 | `ExtractError` → `EXTRACT_REJECTED{reason}`；`LLMError` → `PARSE_FAILED`（`app.run_pipeline()` 的 except） | 同左，话术改自然语言 | `{reason}` 是事实槽位，原样输出 |
 | 6 | 全文没有评分标准 | `NO_RUBRIC_FOUND` 拒拆，**一个字都不落盘**（D-48 / D-49 ②） | **不再是失败**：改走工作量链路（U3，见 §6） | 状态变化要登记（§12） |
@@ -681,7 +681,7 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 | 9/17 | U2 + U3 + **U4 最小集**（换人 / 退出回流 / 加入补位 + 变更台账 + 群公示）→ **收工冻结**（之后只修演示阻塞级问题） |
 | **U4 兜底（时间不够按这条砍）** | 只保**换人**一种变更类型（退出 / 加入顺延 P1）；台账与群公示仍留 —— 与 `requirements-upgrade.md` §5 的"9/18 只保换人"同一口径 |
 | **U4 回归项（v1.8）** | 结算改走 `mutate_many()` **条件写**（只改空负责人 / 只新增卡），`_save_assignments()` 的**整份覆盖列为待改点**（§8.2）；回归 = **改派后重跑结算不丢人工修订** |
-| 9/18 | 彩排（**含 §10.1 第 7 步 U6 拍板、第 13 步 U4 回流认领**）+ T01–T13 全量回归 |
+| 9/18 | 彩排（**含 §10.1 第 7 步 U6 拍板、第 13 步 U4 回流认领**）+ T01–T13 全量回归。**不依赖 U2 / U4 的那部分已拆成清单** `docs\REHEARSAL-0918.md`（§4.6 三格 + §9.1 的 18 条话术样例，本批实做 10 条），**依赖 U2 / U4 的留槽位标「待落定」**；本批**不碰 `data-upgrade\workspaces\`** |
 | 9/19 | 提交 |
 
 **P2 开关（时间不够就按这个顺序砍）**：交互卡片 → 工作空间改名 → 拆卡/并卡 → 多份作业并存 → 匿名提交者查询。
@@ -725,6 +725,7 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 | 架构师复核：补丁批前半（v1.13） | 架构师 | **已复核（2026-09-16）**：独立复跑 干跑 → 迁移 → 复跑 → 回退（落 `_rehearsal`）—— 首跑 `workspace_changes=17`、复跑 `workspace_changes=0` + `idempotent=True`、同秒两跑落 `MANIFEST-…-2.json`、回退 `[removed]` + 摘 3 条绑定；**MVP `data\` 21 个文件哈希前后一致**；`pytest` **438 passed**（新文件 **17** 条）⇒ 记录 `docs/evidence/2026-09-16-architect-countersign-v1.12.md` |
 | 只读计数工具 `tools\count_replies.py`（v1.13） | 架构师 | **已交付（2026-09-16）**：纯 AST、不进运行时；§11.1 的复跑口径落在它上面（复跑 = `all 78 / text 73 / sym 5 / lines 326`） |
 | 手册 `docs\OPERATIONS-U2.md`（v1.13） | 架构师 | **已交付（2026-09-16）**；验收口径已按 §12.4 复跑一次（见本表「架构师复核」行） |
+| 9/18 彩排清单 `docs\REHEARSAL-0918.md`（v1.15） | 架构师 | **已交付（2026-09-16）**：只做**不依赖 U2 / U4** 的部分（§4.6 三格 + §9.1 的 18 条话术样例，实做 10 条）+ 依赖项留「待落定」槽位；**动 `data-upgrade\` 之前必须跑完**（理由写在清单头部）—— 待跑，结论回填 §4.6 / §9.3 |
 ## 14. 送审与判定
 
 1. 材料填完 → 我按 §0 + `requirements-upgrade.md` §8 的 12 条逐项审。
@@ -751,7 +752,7 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 ---
 
 > **变更记录**：
-> **规则：只写锚文本（章节 / 条号 / 函数名），不写行号** —— 行号已漂三次（"63 条"那批、REQ 的那处、§8.4 那批），行号一律以 diff 为准。
+> **规则（v1.15 扩到正文）：凡指代码位置，一律只写锚文本（文件 + 函数 / 分支描述），正文与变更记录都不写行号** —— 行号已漂四次（"63 条"那批、REQ 的那处、§8.4 那批），行号一律以 diff 为准。
 > - 2026-09-15 v1.0-skeleton 首版（骨架 + 14 节 + 证据槽 + 待填清单）。
 > - 2026-09-15 v1.1：§2 隔离实测证据；§4 登记两条口径；§13 状态；新增 §15（待 PM 确认）。
 > - 2026-09-15 v1.2：§2 补进程隔离实测与独立测试群确认。
@@ -815,7 +816,7 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 > - 2026-09-16 **v1.10（PM 清点 + 审核第 5 轮回盘）**：
 >   - ① §4.5 的**编号清单**按实现期订正改序（剥 @段 → 登记状态机 → @ 门禁 → 投票 / 志愿 → 前缀 → 兜底），与下文散文一致；"第 5→6 步是错的"改述为"v1.3 原文顺序是错的"；§4.5 内"跳过第 5 步"的交叉引用同步改。
 >   - ② 单测数改**分文件实测净增**：`test_gateway_router.py` +13 / `test_vote.py` +12 / `test_gateway_events.py` +4 / `test_replies.py` +7 = **36**（原"门禁 11 / U6 12 / @ 识别 4 / 话术 7"=34 与实测不符，自制分类废弃）。
->   - ③ `models.py` 引用改**方法名 + 方法内行号**：`TaskCard.validate()` `src/models.py:161-167`（原 `:143` 是类定义行）、`AssignmentRecord.validate()` `:206-211`（原 `:198`）。
+>   - ③ `models.py` 引用改**方法名锚文本**：`TaskCard.validate()` / `AssignmentRecord.validate()`（当时写的是「方法名 + 方法内行号」；v1.15 起行号一并废掉 —— 锚文本只留方法名 / 分支描述）。
 >   - ④ §0 三个复选框 → **代勾 + "PM 2026-09-16 核"**，并注明代勾依据（审核第 5 轮 §1）。
 >   - ⑤ §13 加**归属注记**（`bed2574` 代码归开发、架构师代提）；补丁批**分工定案**（工具归开发 / 手册与验收口径归架构师），§12.4 同步。
 >   - ⑥ 另登记两条（审核第 5 轮 §7.2 / §7.4）：**待补用例**"登记状态机前置"（约 5 行，归开发）与**补丁批降级序建议**（未裁）。
@@ -842,3 +843,8 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 >   - ① **降级序 PM 点头**（删掉「待点头」字样），并采纳 PM 追加条件：砍到**改名章节**时，清空 / 重置那节**必须留一行「改名本轮不做（P2 开关）」**（否则「三动作」被读成两动作）⇒ 已写进 `docs\OPERATIONS-U2.md` §0 与 §2 的保底行。
 >   - ② §13 的迁移工具行仍写 **15 条回归** ⇒ 统一 **17 条**（v1.13 只改了 §12.4 那一处，这处漏了）。
 >   - ③ **更正 v1.13 复核证据里的一处措辞**：`pytest` **436 与 438 都对** —— 436 = 用例 15 条那版、438 = 17 条这版，时点不同、都不是错报；`--basetemp` 那个坑是真坑，但**与这两个数无关**。证据文件 §4 已改。
+> - 2026-09-16 **v1.15（行号根治 + §4.6 两处口径）**：
+>   - ① **行号根治**：正文与变更记录里**所有** `文件.py:行号` 引用一律换成**符号锚文本**（文件 + 函数 / 分支描述），硬规则句从「变更记录不写行号」**扩到正文**（**行号已漂四次**；这次抽查的 5 处**全错** —— `route()` 的 `sender_type == "app"` 分支其实在 `route()` 开头、`_by_prefix()` 兜底在函数末尾、`PENDING_FILE_TTL` / `_pending_file()` 都不在原来标的行）。**核对方式**：`grep -n '\.py:[0-9]' docs/ARCHITECTURE-UPGRADE.md` 必须为空。
+>   - ② §4.6 第 1 条：**7 条 → 6 格**（①–⑥；⑥ 含两个动作 ⇒ 动作总数 7），与证据文件 §2 的 6 行对齐。
+>   - ③ §4.6 引用口径更新：**引用目标 = 证据文件里的逐字原文**（开发已把 `%TEMP%\u1_smoke.log` 第 9–23 行贴回，剔除带 `access_key` / `ticket` 的连接行），不再引用会被系统清理的 `%TEMP%` 文件。
+>   - ④ 新增 **9/18 彩排清单** `docs\REHEARSAL-0918.md`：只做**不依赖 U2 / U4** 的部分（§4.6 三格 + §9.1 的 18 条话术样例），依赖 U2 / U4 的**留槽位标「待落定」**（理由：这三格必须赶在 U2 动 `data-upgrade\` 之前验，否则环境要重建）。
