@@ -2,7 +2,8 @@
 
 流程（方案 §2.2 ~ §2.6）：
 
-  群里发「方向」→ 后台生成 2–3 个候选 → 候选发群 + 开投票窗口（``awaiting=vote``）
+  群里发「方向」（**发信人须是花名册成员**，v1.24 / §12.4）→ 后台生成 2–3 个候选
+  → 候选发群 + 开投票窗口（``awaiting=vote``）
   → 组员在**开窗那个群**回裸数字 → 一人一票、后投覆盖
   → 关闭（**三条任一，只关一次**）：某方向"已投票者过半"且过门槛（D-35 / D-36）/
     超时 10 分钟（``VOTE_TTL``，到期后**任何**到达的消息都会触发收口）/
@@ -122,6 +123,8 @@ def command(
     """「方向」：群里 = 起后台生成 + 开窗；私聊 = 指出"去群里发"（§2.2）。
 
     前置缺哪句就回哪句，且**都不起 pipeline**（同必修 4 的口径：回话与起不起重活同源）。
+    **v1.24 起再加一条**：发信人必须是花名册成员（判点 = ``roster.members`` 的 open_id
+    集合），否则回 ``DIRECTION_NOT_MEMBER`` —— 见下面 ``known`` 那段。
     """
     if not has_rubric:
         # D-48 口径：没有评分点就不生成，不烧 token
@@ -129,6 +132,12 @@ def command(
     members = list(getattr(roster, "members", None) or ())
     if not members:
         return Outcome(replies=(reply(inbound, replies.VOTE_NEED_ROSTER),))
+    known = {member.open_id for member in members}
+    if known and inbound.sender_open_id not in known:
+        # v1.24（§5.1 第 3 条 / §12.4）：开窗能力只给花名册成员，判点与
+        # `router._proposal()` 同款；名册为空 = 还没登记 ⇒ 谁都算数（那种情况
+        # 上一句就已经接住了，这里是兜底口径）。三条前置都**不起 pipeline**。
+        return Outcome(replies=(reply(inbound, replies.DIRECTION_NOT_MEMBER),))
     if inbound.chat_type != "group":
         # 投票是群里的动作（T05 原文"回复数字投票"）。私聊发这句只指出正确去处。
         return Outcome(replies=(reply(inbound, replies.VOTE_NEED_GROUP),))

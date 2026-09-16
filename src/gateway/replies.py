@@ -50,6 +50,7 @@ __all__ = [
     "VOTE_GENERATING",
     "VOTE_NEED_GROUP",
     "VOTE_NEED_ROSTER",
+    "DIRECTION_NOT_MEMBER",
     "VOTE_IN_PROGRESS",
     "VOTE_CANDIDATES",
     "VOTE_ACK",
@@ -205,6 +206,8 @@ NO_RUBRIC_FOUND = (
 VOTE_GENERATING = "收到，按评分点想几个候选方向，大概半分钟。"
 VOTE_NEED_GROUP = "方向投票是群里的事，把「方向」发到群里。"
 VOTE_NEED_ROSTER = "还没有花名册。先在群里回「登记」建一份，再回「方向」。"
+# v1.24（§5.1 第 3 条 / §12.4）：开窗能力只给名册成员 —— 判点与 `_proposal()` 同款。
+DIRECTION_NOT_MEMBER = "这份花名册里没有你。先在群里回「登记」把自己 @ 进去，再回「方向」开投票。"
 VOTE_IN_PROGRESS = "投票还在走，还剩 {minutes} 分钟。直接回数字就行。"
 # 候选文案里这句"仅供参考，由全组拍板"是 §7 验收项，别删。
 VOTE_CANDIDATES = (

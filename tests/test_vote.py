@@ -119,6 +119,34 @@ def test_direction_without_roster_does_not_start_the_pipeline():
     assert outcome.pipeline == ""
 
 
+def test_a_stranger_cannot_open_the_window():
+    """v1.24（§5.1 第 3 条 / §12.4）：非花名册成员发「方向」⇒ **不开窗**、awaiting 不动。"""
+    outcome = route(
+        _inbound("方向", sender_open_id="ou_stranger"), {}, _roster(), has_rubric=True, now=OPEN
+    )
+    assert _texts(outcome) == [replies.DIRECTION_NOT_MEMBER]
+    assert outcome.pipeline == ""                # 不起重活：一个 token 都不烧
+    assert outcome.state is None                 # awaiting 不动（没往盘上落窗口）
+
+
+def test_a_stranger_cannot_touch_a_running_window():
+    """同上：窗口开着时外人发「方向」，不回投票进度、也不动票（state 原样不动）。"""
+    state = _state(votes={"ou_li": 1})
+    outcome = route(
+        _inbound("方向", sender_open_id="ou_stranger"), state, _roster(), has_rubric=True, now=OPEN
+    )
+    assert _texts(outcome) == [replies.DIRECTION_NOT_MEMBER]
+    assert outcome.state is None
+    assert state["vote"]["votes"] == {"ou_li": 1}
+
+
+def test_a_stranger_in_private_learns_they_are_not_on_the_roster():
+    """私聊同一判据**先于**「去群里发」：让他去登记，而不是指他发到群里再被拒一次。"""
+    outcome = route(_private("方向", sender="ou_stranger"), {}, _roster(), has_rubric=True, now=OPEN)
+    assert _texts(outcome) == [replies.DIRECTION_NOT_MEMBER]
+    assert outcome.pipeline == ""
+
+
 def test_private_direction_points_to_the_group_without_burning_tokens():
     outcome = route(_private("方向"), {}, _roster(), has_rubric=True, now=OPEN)
     assert _texts(outcome) == [replies.VOTE_NEED_GROUP]
