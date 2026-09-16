@@ -7,9 +7,31 @@
 
 ## 1. 原样日志（`recv` = 收到，`-> … ok` = 回话）
 
+原始文件：`%TEMP%\u1_smoke.log`（2026-09-16 10:46:40 收尾，**3332 字节 / 24 行**；复核时 sha256 前 16 = `7EB8633B39C147DB`）。
+
+下面贴的是该文件的**第 9–23 行（15 行）逐字原文**（行尾统一为 LF 存放，内容一字未改）。未贴的四类：脚本启动横幅、两条 Python 依赖 warning、`[Lark] connected to wss://…` 那一行（带 `access_key` / `ticket`，按 `.gitignore` 的口径「运行日志可能含凭据，禁止入库」剔除）、以及最后的退出行 —— **被剔除的只有这些**。`%TEMP%` 会被系统清理，所以内容在这里贴全。
+
 ```
-{log}
+[M0] 2026-09-16T10:44:31 recv id=om_x100b65946624b514b24107288bc1c34 chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=text text=@_user_1 你好
+[M0] 2026-09-16T10:44:32 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 直接说要做哪件就行：
+1. 把作业书发进群，再 @我 说「作业书」—— 我抽评分
+[M0] 2026-09-16T10:44:39 recv id=om_x100b659467b90914b2ef3cc9c75577e chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=text text=大家好
+[M0] 2026-09-16T10:44:53 recv id=om_x100b6594649c60b0df99e9a182d13fd chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=file text=
+[M0] 2026-09-16T10:45:05 recv id=om_x100b659465d9c4bcb3f4aed722328c5 chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=text text=@_user_1 作业书
+[M0] 2026-09-16T10:45:06 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 收到，开始解析作业书，大概半分钟。
+Consider using the pymupdf_layout package for a greatly improved page layout analysis.
+[M0] 2026-09-16T10:45:15 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 《营销方案计划》 电子商务技能检测｜交付：现场操作，小组合作完成一份营销计划方案
+[M0] 2026-09-16T10:45:21 recv id=om_x100b659462da5cacb39f164983abd5d chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=text text=作业书
+[M0] 2026-09-16T10:45:44 recv id=om_x100b659463b088a0dfe9ad74b7e591c chat=oc_e4a2bb0ffbb56d8ddc288917b66d5a5f from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=file text=
+[M0] 2026-09-16T10:45:45 -> chat_id:oc_e4a2bb0ffbb56d8ddc288917b66d5a5f ok | 《营销方案计划》任务书.pdf》我拿到了，回「作业书」我就开始解析。
+[M0] 2026-09-16T10:45:48 recv id=om_x100b6594637408b0b32aab79593c03c chat=oc_e4a2bb0ffbb56d8ddc288917b66d5a5f from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=text text=作业书
+[M0] 2026-09-16T10:45:49 -> chat_id:oc_e4a2bb0ffbb56d8ddc288917b66d5a5f ok | 收到，开始解析作业书，大概半分钟。
+[M0] 2026-09-16T10:45:57 -> chat_id:oc_e4a2bb0ffbb56d8ddc288917b66d5a5f ok | 《营销方案计划》 电子商务技能检测｜交付：现场操作，小组合作完成一份营销计划方案
 ```
+
+对着 §2 的时间戳读：`10:44:39` / `10:44:53` / `10:45:21` 三处**只有 `recv`、没有 `-> ` 行** —— 那就是「静默」在日志里的样子。
+
+**一处读日志的注意点**：`10:44:32` 那条回话的清单第 1 行在**原始日志里就是断的** —— 到「我抽评分」为止（原文件那个字节位置之后直接就是 `\r\n`，不是本文件贴漏）；完整正文以 §2 ① 引的那句为准（`…我抽评分点、拆任务卡`）。
 
 ## 2. 逐条结论
 
@@ -30,7 +52,8 @@
 
 ```
 10:45:08  129583  uploads\营销方案计划》任务书.pdf        ← 私聊那份被下载
-10:45:14     260  assignment.json
+10:45:14     260  assignment.json   ← 作业元信息（storage.py:52 的 ASSIGNMENT：课程 / 标题 / 截止）
+                                      分配记录是**另一个文件**：assignments.json（storage.py:56），本盘尚未产生 —— 这两个名字别当笔误
 10:45:14    3000  rubric.json      → 12 条评分点（R1…R12，status=normal）
 10:45:14    2925  cards.json       → 7 张任务卡（T1…T7，带 rubric_refs）
 10:45:15      64  state.json       → pending_file 已被消费（只剩 group_chat_id）
