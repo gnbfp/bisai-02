@@ -1,4 +1,4 @@
-# 升级架构材料 · v1.12（U1–U6）
+# 升级架构材料 · v1.13（U1–U6）
 
 > **定位**：升级版架构材料的**模板 + 证据清单**。填完即可送审；审核标准 = `requirements-upgrade.md` §8 的 12 条 + 本文件每节的"证据"。
 > **依据顺序**：`docs/requirements/README.md`（第 1 层，冲突时以此为准）> `requirements-upgrade.md`（升级真源）> `requirements.md`（MVP 真源与 D- 台账）> `docs/ARCHITECTURE.md`（MVP 架构 v1.2，仅作现状参考）。
@@ -263,14 +263,16 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 
 **门禁通过条件（仅群聊文本）**：`Inbound.bot_mentioned == True`，或命中免 @ 白名单（§4.4 的词表 + 仅窗口内生效）。
 
-**缺口（v1.11 已补）**：`to_inbound()` 原来只取 `Mention(key, open_id, name)`（`src/gateway/events.py`），**没有"这个 @ 是不是机器人"这个字段**；探针已证明平台会送 `mentioned_type=bot`（证据文件 §2 第 4 条）。现已落 `Inbound.bot_mentioned: bool` + `Mention.is_bot`，判据**两个取或**：① 平台 `mentioned_type == "bot"`；② **兜底** `open_id == FEISHU_BOT_OPEN_ID`（平台没给字段时仍认得出；PM 2026-09-16 认，落点见 §4.6 与真源 §4）。**真机已验（2026-09-16）**：群里 `@机器人007 你好` 有回应，见 `docs/evidence/2026-09-16-u1-smoke-real-device.md`。
+**缺口（v1.11 已补）**：`to_inbound()` 原来只取 `Mention(key, open_id, name)`（`src/gateway/events.py`），**没有"这个 @ 是不是机器人"这个字段**；探针已证明平台会送 `mentioned_type=bot`（证据文件 §2 第 4 条）。现已落 `Inbound.bot_mentioned: bool` + `Mention.is_bot`，判据**两个取或**：① 平台 `mentioned_type == "bot"`；② **兜底** `open_id == FEISHU_BOT_OPEN_ID`（平台没给字段时仍认得出；PM 2026-09-16 认，落点见 §4.6 与真源 §4）。**判据 ① 真机已验（2026-09-16）**：群里 `@机器人007 你好` 有回应，见 `docs/evidence/2026-09-16-u1-smoke-real-device.md`；**判据 ② 真机构造不出来**（平台不会漏发 `mentioned_type`），只留单测撑 —— 口径见 §4.6。
 
 **兜底同步改**：`_by_prefix()` 末尾现在**无条件**回指令列表（`src/gateway/router.py:247`）⇒ 升级后只在**被 @ 时**才回。
 ### 4.6 未验证
 
 - [x] **矩阵穿透实测（真机，2026-09-16）**：7 条跑通 —— 群 `@` 文本 → 响应 / 群不 `@` 文本 → 静默 / 群不 `@` 指令 → 静默 / 群文件 → 静默 + 缓存 / 群 `@` 指令 → 执行出评分点 / 私聊文件 → 回执 / 私聊指令 → 执行。原样日志与落盘见 `docs/evidence/2026-09-16-u1-smoke-real-device.md`
 - [ ] **矩阵未覆盖的格（真机）**：图片消息（群静默 / 私聊拒收）、投票窗 × 群内裸数字、投票中 `@` 作业书 —— 同份证据文件 §4
-- [x] **`bot_mentioned` 的 @ 识别（真机，2026-09-16）**：判据**两个取或** —— ① 平台 `mentioned_type == "bot"`；② **兜底** `open_id == FEISHU_BOT_OPEN_ID`（`src/gateway/events.py:_is_bot_mention()`；配置项见真源 §4；单测 `test_to_inbound_falls_back_to_the_bot_open_id` / `test_the_bot_open_id_fallback_does_not_match_other_people`）。真机 `@机器人007` 认得出 —— **两条判据同时配着，日志分不出是哪条命中**（想单独验 ① 就临时清空 `FEISHU_BOT_OPEN_ID` 再发一条；登记证据文件 §4）。**认不出来仍当没 @**（偏保守：漏判少回一句，误判会乱插嘴）
+- [x] **判据 ①（平台 `mentioned_type == "bot"`）真机已验（2026-09-16）**：群里 `@机器人007` 认得出，原样日志见 `docs/evidence/2026-09-16-u1-smoke-real-device.md`。**那次两条判据同时配着，日志分不出是哪条命中**（要单验 ① 得临时清空 `FEISHU_BOT_OPEN_ID` 再发一条 —— 可选，不为它再开机）
+- [ ] **判据 ②（兜底 `open_id == FEISHU_BOT_OPEN_ID`）只有单测、真机无法构造**：平台正常都会带 `mentioned_type`，造不出「字段缺失但 `open_id` 命中」的真机消息 ⇒ 只有 `src/gateway/events.py:_is_bot_mention()` 的两条单测撑着（`test_to_inbound_falls_back_to_the_bot_open_id` / `test_the_bot_open_id_fallback_does_not_match_other_people`）。**保留为兜底，不计入真机覆盖**
+- 两条判据**取或**；**认不出来仍当没 @**（偏保守：漏判少回一句，误判会乱插嘴）
 ## 5. 指令与路由（审核 4）
 ### 5.1 路由表现状与升级后（前缀精确匹配不变，D-02/§7.1 的口径保留）
 
@@ -675,7 +677,7 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 | 9/16 上午 | 本材料定稿送审（按 §15 的两批证据口径判；§15 已由 **PM 追认**）；§12.3 的 10 条"需 PM"项**已全部裁决并回写**（v1.5）；**未认 1 条**：第 1 条（数据根写法，待前置负责人）；第 17 条（防呆收窄）PM 2026-09-16 **已认**（三条件见 §3.2 / §12.4） |
 | **复审** | **开工前批若判"不通过" → 修订后只交 diff 复审（不自行判"通过"）**。**复审窗口 = 定稿后 2 小时内**（架构师交 diff → 审核员逐条判）；**通过 ⇒ 当日开工；不通过 ⇒ 先做不依赖被卡节的部分（U1 话术层 / U5），被卡节顺延**。v1.3 / v1.4 / v1.5 / v1.6 / v1.7 / v1.8 六次（+ 本轮 v1.9）的修订范围见文末变更记录 |
 | 9/16 下午 | 开工：U1 + U5（都是"说话方式"，一起改最省事）→ 尾部**开 U6**（1 条前缀 + 1 个台账字段，挂在 U1 已动的路由表上，量级最小）—— **已落地（v1.9，2026-09-16 下午）**：U1 门禁（`may_speak()`）+ 群内静默缓存分支 + U5 全量改词（`replies.py` 61 → 72 条）+ U6 人工拍板一起落盘，`pytest` **417 passed**；实现期新增两条口径见 §4.5（登记状态机排在门禁之前）与 §5.3（归并阈值） |
-| **9/17 上午（U2 之前）** | **补丁批**（审核 #2 的 3 条开工后补，见 `docs/evidence/2026-09-16-v1.5-逐条复核.md`）：`tools\migrate_workspace.py`（幂等 + `Resolve-Path` 守卫 + 重跑演练 + `MANIFEST`）+ `data\state.json` 多会话守卫（依据 §3.6）；**手册 `docs\OPERATIONS-U2.md` 与 U2 同批交付**（清空 / 重置 / 改名 + 执行人记录位 `data-upgrade\maintenance.log`）。**属 U2 交付内容、随 U2 一并验收** —— 审核 #12 唯一未过的条件。**分工（v1.10）：`tools\migrate_workspace.py` 归开发；手册 +"重跑演练 + `MANIFEST`"验收口径归架构师** —— 同一批文件不两人同时改。**降级序（v1.10 · 架构师建议，未经 PM 裁）**：被挤掉时先保工具（U2 迁移必须先能跑），手册顺延到 U2 交付当天。**v1.11 追加一条**：删掉 `run-upgrade.ps1` 的 `-Echo` 死开关 —— 它传 `--echo`，而 `src/gateway/app.py` 的 argparse 只认 `--seconds` / `--quiet` ⇒ 不带 `-Probe` 启动必 `exit 2`（`--echo` 只有 `tools\probe_feishu.py` 认），建议直接删。**v1.12 追加（开发，2026-09-16）**：`tools\migrate_workspace.py` **已落地**（幂等 + `Resolve-Path` 守卫 + `MANIFEST`；`tests\test_migrate_workspace.py` **15 条**钉住幂等 / 守卫 / `pending_file` 跨会话，**变异验证 3/3 被咬住**），证据 = `docs\evidence\2026-09-16-migrate-workspace-tool-rehearsal.md`；**"重跑演练"的验收仍归架构师**（§13 那行不勾）。**并订正 v1.11 的 `-Echo` 结论**：它不是"完全死"—— `run-upgrade.ps1 -Probe -Echo` 这条路径**是通的**（`--echo` 由 `tools\probe_feishu.py` 认），只有"**不带 `-Probe`**"才必 `exit 2`；**PM 2026-09-16 选 ②**：只在 `-Probe` 时透传 `--echo`（已落地，见 §13 与证据文件 §12）；另 **§11 的数字按 PM 指示改为"复跑命令 + 最近一次输出"（请架构师复核 §11）** |
+| **9/17 上午（U2 之前）** | **补丁批**（审核 #2 的 3 条开工后补，见 `docs/evidence/2026-09-16-v1.5-逐条复核.md`）：`tools\migrate_workspace.py`（幂等 + `Resolve-Path` 守卫 + 重跑演练 + `MANIFEST`）+ `data\state.json` 多会话守卫（依据 §3.6）；**手册 `docs\OPERATIONS-U2.md` 与 U2 同批交付**（清空 / 重置 / 改名 + 执行人记录位 `data-upgrade\maintenance.log`）。**属 U2 交付内容、随 U2 一并验收** —— 审核 #12 唯一未过的条件。**分工（v1.10）：`tools\migrate_workspace.py` 归开发；手册 +"重跑演练 + `MANIFEST`"验收口径归架构师** —— 同一批文件不两人同时改。**降级序（v1.13 · 架构师给序，PM 2026-09-16 待点头）**：挤掉时砍序 = 手册的排障 / 示例段 → 演练留痕行 → 手册的改名章节；**必须留 = 迁移工具（U2 迁移的唯一通道）+ 手册的「清空 / 重置 / 执行人记录字段表」**。**v1.11 追加一条**：删掉 `run-upgrade.ps1` 的 `-Echo` 死开关 —— 它传 `--echo`，而 `src/gateway/app.py` 的 argparse 只认 `--seconds` / `--quiet` ⇒ 不带 `-Probe` 启动必 `exit 2`（`--echo` 只有 `tools\probe_feishu.py` 认），建议直接删。**v1.12 追加（开发，2026-09-16）**：`tools\migrate_workspace.py` **已落地**（幂等 + `Resolve-Path` 守卫 + `MANIFEST`；`tests\test_migrate_workspace.py` **17 条**钉住幂等 / 守卫 / `pending_file` 跨会话，**变异验证 3/3 被咬住**），证据 = `docs\evidence\2026-09-16-migrate-workspace-tool-rehearsal.md`；**"重跑演练"的验收仍归架构师**（§13 那行不勾）。**并订正 v1.11 的 `-Echo` 结论**：它不是"完全死"—— `run-upgrade.ps1 -Probe -Echo` 这条路径**是通的**（`--echo` 由 `tools\probe_feishu.py` 认），只有"**不带 `-Probe`**"才必 `exit 2`；**PM 2026-09-16 选 ②**：只在 `-Probe` 时透传 `--echo`（已落地，见 §13 与证据文件 §12）；另 **§11 的数字按 PM 指示改为"复跑命令 + 最近一次输出"（§11 复核见 v1.13 ①）** |
 | 9/17 | U2 + U3 + **U4 最小集**（换人 / 退出回流 / 加入补位 + 变更台账 + 群公示）→ **收工冻结**（之后只修演示阻塞级问题） |
 | **U4 兜底（时间不够按这条砍）** | 只保**换人**一种变更类型（退出 / 加入顺延 P1）；台账与群公示仍留 —— 与 `requirements-upgrade.md` §5 的"9/18 只保换人"同一口径 |
 | **U4 回归项（v1.8）** | 结算改走 `mutate_many()` **条件写**（只改空负责人 / 只新增卡），`_save_assignments()` 的**整份覆盖列为待改点**（§8.2）；回归 = **改派后重跑结算不丢人工修订** |
@@ -710,7 +712,7 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 | 12 | 架构师 + 需求侧 | **已填（v1.5 增补至 16 条口径，v1.6 补第 17/18 条）**；其中 10 条"需 PM"项**已于 2026-09-15 全部裁决并回写**；**未认 1 条**：第 1 条（数据根写法，待前置负责人）；第 17 条（防呆收窄）PM 2026-09-16 **已认**（三条件见 §3.2 / §12.4） |
 | U4 / U6 时间槽 | 架构师 | **已补（v1.6，§12.4）**：U6 挂在 9/16 下午 U1 段尾；U4 最小集在 9/17；降级 = 只保"换人"（= 审核 #12 不通过的唯一原因） |
 | 补丁：`tools\migrate_workspace.py` | **开发**（v1.10 定） | **工具已落地（v1.12）**：幂等 + `Resolve-Path` 守卫 + `MANIFEST` + 15 条回归（变异验证 3/3 被咬住），自测演练 = 干跑 → 迁移 → 复跑（写盘 0）→ 回退，见 §12.4 与 `docs\evidence\2026-09-16-migrate-workspace-tool-rehearsal.md`。**"重跑演练"那一半仍归架构师，「写了但没验」的口径不变** —— 本行只清掉"写"这一半；**PM 2026-09-16 裁的 3 条已落地**（`migrated_from` 记仓库相对路径 / `created_at` 写明"登记时刻"并要写进手册 / 回退摘悬挂绑定保持），见证据文件 §12 |
-| 补丁：离线操作手册 `docs\OPERATIONS-U2.md` | **架构师**（v1.10 定；含"重跑演练 + `MANIFEST`"验收口径） | **未做（v1.7 登记）**：随 U2 交付；含清空 / 重置 / 改名 + 执行人记录（`data-upgrade\maintenance.log`）—— U2 防呆收窄的三条件（PM 2026-09-16 认） |
+| 补丁：离线操作手册 `docs\OPERATIONS-U2.md` | **架构师**（v1.10 定；含"重跑演练 + `MANIFEST`"验收口径） | **已交付（v1.13，2026-09-16）**：`docs\OPERATIONS-U2.md`；含清空 / 重置 / 改名 + 执行人记录（`data-upgrade\maintenance.log`）+ 验收口径「重跑演练 + `MANIFEST`」（架构师 2026-09-16 已复跑一次）—— U2 防呆收窄的三条件（PM 2026-09-16 认） |
 | 待改点：`_save_assignments()` 整份覆盖 | 开发 | **待改（v1.8）**：结算改走 `mutate_many()` 条件写（§8.2）；回归项 = 改派后重跑结算不丢人工修订（§12.4 / §12.5） |
 | 只读诊断 §3.6 | 架构师 | **已填（2026-09-16，只读）**：`data\state.json` 并存 2 个 chat_id、`data\` 见过 3 个会话；`oc_6feb8f64…` 来源**不可判定**（待真人确认，不猜） |
 | 0 完整性检查 | 需求侧（PM） | 送审时 |
@@ -720,6 +722,9 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 | 补丁：`run-upgrade.ps1` 的 `-Echo` 开关 | 开发 | **待裁（v1.12 订正）**：排 9/17 上午补丁批（§12.4）。**订正 v1.11 的"死开关"判定**：`-Echo` 只在"不带 `-Probe`"时必 `exit 2`；`run-upgrade.ps1 -Probe -Echo` 是**通的**（`--echo` 由 `tools\probe_feishu.py` 认，`app.py` 不认）⇒ 二选一：① 直接删开关（v1.11 建议）；② 只在 `-Probe` 时透传 `--echo`（保住探针的发送自检）。**PM 2026-09-16 选 ②，已落地**：`run-upgrade.ps1` 只在 `-Probe` 时透传 + 脚本头补一行用法，打桩实测见证据文件 §12；"删开关"不再议 |
 | 真机冒烟：U1 门禁 + `作业书` 两条链路（v1.11） | 开发 | **已跑（2026-09-16）**：6 条穿透（①②③④⑤⑥）+ 群 / 私聊两条 `作业书` 链路；`pytest` **421 passed**；原样日志与落盘见 `docs/evidence/2026-09-16-u1-smoke-real-device.md`。**未覆盖**：图片消息、投票窗那两格 |
 | 归属注记（v1.10） | 架构师 | **`bed2574` 的代码由开发产出、架构师代提**（同一工作区，避免未提交状态阻塞复核）；`28f898d` 的文档面由架构师产出；两笔都已推 `bisai` |
+| 架构师复核：补丁批前半（v1.13） | 架构师 | **已复核（2026-09-16）**：独立复跑 干跑 → 迁移 → 复跑 → 回退（落 `_rehearsal`）—— 首跑 `workspace_changes=17`、复跑 `workspace_changes=0` + `idempotent=True`、同秒两跑落 `MANIFEST-…-2.json`、回退 `[removed]` + 摘 3 条绑定；**MVP `data\` 21 个文件哈希前后一致**；`pytest` **438 passed**（新文件 **17** 条）⇒ 记录 `docs/evidence/2026-09-16-architect-countersign-v1.12.md` |
+| 只读计数工具 `tools\count_replies.py`（v1.13） | 架构师 | **已交付（2026-09-16）**：纯 AST、不进运行时；§11.1 的复跑口径落在它上面（复跑 = `all 78 / text 73 / sym 5 / lines 326`） |
+| 手册 `docs\OPERATIONS-U2.md`（v1.13） | 架构师 | **已交付（2026-09-16）**；验收口径已按 §12.4 复跑一次（见本表「架构师复核」行） |
 ## 14. 送审与判定
 
 1. 材料填完 → 我按 §0 + `requirements-upgrade.md` §8 的 12 条逐项审。
@@ -823,5 +828,13 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 >   - ⑥ **订正 v1.11 的 `-Echo` 结论**：只在"不带 `-Probe`"时才必 `exit 2`（`-Probe -Echo` 通）⇒ 删开关 / 只在 `-Probe` 时透传，**待 PM 裁**（§13）。
 >   - ⑦ **PM 2026-09-16 裁 3 条（已落地，证据文件 §12）**：`migrated_from` **记仓库相对路径**（`data`）—— 不许把 `D:\AI创新创业大赛\data` 这种机器绝对路径写进索引（新增 `source_label()`）；`created_at` **不改名**，语义写明"= 该工作空间在索引里的登记时刻"，重跑不覆盖（**手册要抄这句**）；回退摘 `user_last_group` 悬挂绑定 —— **认，保持**。
 >   - ⑧ **`-Echo` 按 PM 选定 ② 落地**：`run-upgrade.ps1` 只在 `-Probe` 时透传 `--echo` + 脚本头补一行用法；打桩实测三种组合（`-Echo` / `-Probe -Echo` / `-Probe`）原样输出存证据文件 §12。
->   - ⑨ **§11 的数字改成"复跑命令 + 最近一次输出"**（PM 2026-09-16 指示）：原写死的 `__all__` 72 项 / 文案常量 70 / 单文件 276 行已漂，本机实测 **78 项（常量 73 + 符号 5）/ 326 行**；§11.1 / §11.3 / §11.4① / §11.5 四处改成命令 + 输出，不再钉数字。§11.1 的复跑口径落在**架构师 2026-09-16 11:31 落盘的只读脚本 `tools\count_replies.py`** 上（本机跑出 all 78 / text 73 / sym 5 / lines 326，与本轮实测一致）；**该脚本尚未提交 —— 归架构师那一笔，本笔不代提**。另订正一条：`route` 不是作用域（路由总条数 = `len(COMMANDS)` = 9），`command_list()` 返回文本、别用 `len()` 当条数。**请架构师复核 §11 这一节。**
->   - ⑩ `tests\test_gateway_router.py` 的 `_nobody` 重复定义两处（原 `:36` / `:735`）**并掉**。
+>   - ⑨ **§11 的数字改成"复跑命令 + 最近一次输出"**（PM 2026-09-16 指示）：原写死的 `__all__` 72 项 / 文案常量 70 / 单文件 276 行已漂，本机实测 **78 项（常量 73 + 符号 5）/ 326 行**；§11.1 / §11.3 / §11.4① / §11.5 四处改成命令 + 输出，不再钉数字。§11.1 的复跑口径落在**架构师 2026-09-16 11:31 落盘的只读脚本 `tools\count_replies.py`** 上（本机跑出 all 78 / text 73 / sym 5 / lines 326，与本轮实测一致）；**该脚本尚未提交 —— 归架构师那一笔，本笔不代提**。另订正一条：`route` 不是作用域（路由总条数 = `len(COMMANDS)` = 9），`command_list()` 返回文本、别用 `len()` 当条数。**§11 复核结论见 v1.13 ①（通过，快照逐字复现）。**
+>   - ⑩ `tests\test_gateway_router.py` 的 `_nobody` **重复定义两处并掉**（按 v1.8 的「变更记录只写锚文本」规则，不记行号）。
+> - 2026-09-16 **v1.13（架构师复核：v1.12 自评转判定 + §11 口径 + §4.6 收窄）**：
+>   - ① **§11 复核通过**：`python tools\count_replies.py` 逐字复跑 = `all 78 / text 73 / sym 5 / lines 326`，与 §11.1 的快照**逐字符一致**；脚本把 `text = 73` 拆成 `字符串字面量 69 + 非字面量模板 4`，与「文案常量 73」不矛盾（同一个数、更细的口径）。
+>   - ② **v1.12 的「工具已落地」由架构师独立复跑确认**（不是开发自评）：干跑 / 迁移 / 复跑 / 回退四步全通；**幂等**（复跑 `workspace_changes=0`、`idempotent=True`）；**`MANIFEST` 唯一化**（同秒两跑落 `MANIFEST-…-2.json`）；**MVP `data\` 21 个文件哈希前后一致**；`pytest` **438 passed**（新文件 17 条）。记录 = `docs/evidence/2026-09-16-architect-countersign-v1.12.md`。
+>   - ③ §4.6 第 2 条**收窄为两条判据**：① `mentioned_type` 真机已验；② `FEISHU_BOT_OPEN_ID` 兜底**只有单测、真机无法构造**（不计真机覆盖）。§4.5 的「真机已验」同步写明是**判据 ①**。
+>   - ④ §12.4 的**降级序给出具体砍序**（v1.10 起挂着的「未经 PM 裁」）：见该行；PM 点头后删掉「待点头」标注。
+>   - ⑤ **`docs\OPERATIONS-U2.md` 已交付**（补丁批唯一剩余交付物）：三动作 + 执行人记录 + 验收口径；§12.4 / §13 状态更新。
+>   - ⑥ 顺手清掉 v1.12 ⑩ 里残留的**行号** —— v1.8 已定「变更记录只写锚文本」。
+>   - ⑦ 订正一处**同文件内不一致**：§12.4 的 v1.12 追加仍写 `tests\test_migrate_workspace.py` **15 条**，与同批 ⑤ 的 **17 条** 冲突 ⇒ 统一为 **17 条**。
