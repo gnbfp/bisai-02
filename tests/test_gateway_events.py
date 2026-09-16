@@ -21,8 +21,10 @@ def _event(content='{"text": "hi"}', message_type="text", mentions=(), sender_ty
     return SimpleNamespace(event=SimpleNamespace(message=message, sender=sender))
 
 
-def _mention(key, open_id, name=""):
-    return SimpleNamespace(key=key, id=SimpleNamespace(open_id=open_id), name=name)
+def _mention(key, open_id, name="", mentioned_type=None):
+    return SimpleNamespace(
+        key=key, id=SimpleNamespace(open_id=open_id), name=name, mentioned_type=mentioned_type
+    )
 
 
 def test_to_inbound_maps_text_message():
@@ -139,3 +141,36 @@ def test_post_message_becomes_a_preference_inside_the_window():
     )
 
     assert outcome.save_preference["ranked_task_ids"] == ["T1"]
+
+
+def test_to_inbound_marks_a_bot_mention():
+    """U1 门禁的输入：平台给了 ``mentioned_type="bot"`` 才算"在跟我说话"（§4.5 缺口）。"""
+    inbound = to_inbound(
+        _event(
+            content='{"text": "@_user_1 拆解"}',
+            mentions=[_mention("@_user_1", "ou_bot", "机器人", mentioned_type="bot")],
+        )
+    )
+    assert inbound.bot_mentioned is True
+    assert inbound.mentions[0].is_bot is True
+
+
+def test_to_inbound_does_not_mistake_a_human_mention_for_the_bot():
+    inbound = to_inbound(
+        _event(
+            content='{"text": "@_user_1 登记"}',
+            mentions=[_mention("@_user_1", "ou_zhang", "张三", mentioned_type="user")],
+        )
+    )
+    assert inbound.bot_mentioned is False
+    assert inbound.mentions[0].is_bot is False
+
+
+def test_to_inbound_tolerates_a_missing_mentioned_type():
+    """老事件 / 平台没给字段：当"不是机器人"（偏保守；@ 识别率是未验证项，§4.6）。"""
+    inbound = to_inbound(_event(mentions=[_mention("@_user_1", "ou_bot", "机器人")]))
+    assert inbound.bot_mentioned is False
+
+
+def test_bot_mentioned_defaults_to_false():
+    assert Inbound(chat_id="c1").bot_mentioned is False

@@ -179,6 +179,9 @@ class Gateway:
             cards=self.store.load_cards(),
             preferences=self.store.load_preferences(),
             assignments=self.store.load_assignments(),
+            # U6 的"覆盖已定方向要组长确认"要看盘上有没有已落定方向（§5.3）——
+            # 读盘归 app 层，判定仍在纯函数里
+            direction=self.store.load_direction(),
             source_title=meta.title if meta else "",
         )
         failures = self._deliver(outcome)

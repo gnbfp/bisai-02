@@ -1,8 +1,12 @@
 """M0 路由 + M4/M5 的指令入口 —— 纯函数。**铁律：本文件不许 import lark_oapi**（方案 §1）。
 
-依据：`requirements.md` §7.1（D-33「先剥 @段 → 再看状态 → 最后认前缀」+ 7 条前缀）、
+依据：`requirements.md` §7.1（D-33「先剥 @段 → 再看状态 → 最后认前缀」）、
 D-42（文字与附件必然是两条消息）、**M4 志愿分配 / M5 匿名代言**（D-52~D-55）、
-M0 网关方案 §4 / §5 / §6 / §7。
+M0 网关方案 §4 / §5 / §6 / §7、**U1 触发层**（`docs/ARCHITECTURE-UPGRADE.md` §4，
+含 §4.5「门禁只拦文本、资源走独立分支」的顺序）与 **U6 方向人拍板**（§5.3）。
+
+顶层前缀 **9 条**（原 8 条 + U6 的 `我们要做的方向是：`）；"群内可用 / 私聊可用"的条数
+由 `replies.COMMANDS` 按作用域派生，**不写死**（D-76）。
 
 进出都是纯数据（``Inbound`` / ``dict`` / ``Outcome``）：不联网、不发消息、不读文件，
 所以这一整套规则可以在没有飞书、没有网络的情况下全量单测。
@@ -33,6 +37,7 @@ __all__ = [
     "COMPLETE_PATTERN",
     "PENDING_FILE_TTL",
     "strip_mentions",
+    "may_speak",
     "route",
     "remember_file",
 ]
@@ -61,6 +66,40 @@ def strip_mentions(text: str, mentions: Sequence[Mention] = ()) -> str:
     return _MENTION_PLACEHOLDER.sub("", text or "")
 
 
+def may_speak(
+    inbound: Inbound,
+    text: str,
+    state: dict,
+    roster=None,
+    now: datetime | None = None,
+) -> bool:
+    """U1 门禁：这条**文本**消息机器人该不该响应（§4.4 / §4.5 第 5 步）。
+
+    - 私聊：直接放行（L5）—— 私聊里根本不存在"@ 机器人"这个动作。
+    - 群聊：``@`` 了机器人 → 放行；否则**只认免 @ 白名单**，且只在窗口内生效：
+      * 投票窗口内、**开窗那个群**、花名册成员的纯数字（``vote.exempt()``）；
+      * 投票 / 志愿窗口内、**组长**的「封盘」（可带编号）。
+      白名单之外一律静默 —— 这就是"没被 @ 就不说话"。
+
+    窗口一关（``awaiting`` / 窗口块被清）白名单立刻失效 ⇒ **投完立即恢复门禁**（T05）。
+    """
+    if inbound.chat_type != "group":
+        return True
+    if inbound.bot_mentioned:
+        return True
+    if not inbound.sender_open_id:
+        return False                       # 认不出人：不豁免，宁静静默
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    if stripped.startswith(preference.SEAL_WORD) and (state or {}).get("awaiting") in (
+        "vote",
+        "preference",
+    ):
+        return inbound.sender_open_id == getattr(roster, "leader", None)
+    return vote.exempt(stripped, inbound, state, roster, now)
+
+
 def route(
     inbound: Inbound,
     state: dict,
@@ -70,6 +109,7 @@ def route(
     cards: Sequence = (),
     preferences: Sequence = (),
     assignments: Sequence = (),
+    direction: dict | None = None,
     now: datetime | None = None,
     source_title: str = "",
 ) -> Outcome:
@@ -80,6 +120,8 @@ def route(
     传进的是**数据**不是**路径**，所以这一整套规则照样能离线全量单测。
     ``has_rubric`` 由 app 层从 ``data/rubric.json`` 读出来传进来 —— router 自己不读文件，
     但仍然能对「拆解」给出正确回复（没有评分点 vs 重跑）。
+    ``direction`` 同理（app 层读 ``data/direction.json``）：U6 的"覆盖已定方向要组长确认"
+    与"跟候选差不多就按候选记"都只吃这份数据，判定仍留在纯函数里（§5.3）。
 
     **重活也在这里判**（``Outcome.pipeline``）：回什么话与起不起 M1/M3 必须同源，
     分两处判就会出现"回了「表单没看懂」却照样烧一次 LLM"（必修 4）。
@@ -89,19 +131,27 @@ def route(
     if inbound.sender_type == "app":
         return Outcome()
 
-    # 1. 文件：只缓存，不干活（D-42：文字和附件必然是两条消息）
+    # 1. **资源分支在 @ 门禁之前**（§4.5，v1.4 订正）：文件 / 图片 / 其他资源没有 text
+    #    也没有 @ 结构，各自走独立分支，**不进 @ 判定**。
+    #    文件：只缓存、不干活（D-42：文字和附件必然是两条消息）。**群里静默缓存**
+    #    （U1 闭嘴纪律，§4.2 的必改项），私聊保留"收到"回执（L5）。
     if inbound.message_type == "file":
         return remember_file(inbound, state, now)
-    #    图片：读不了就直说（用户 2026-09-12 拍板，不再静默），但仍然**不入缓存** ——
-    #    必修 3 的底线是"一张图不能把刚发来的作业书 PDF 挤掉"。其余类型保持静默。
+    #    图片：**群里静默**（本轮口径改写，§12.3 第 13 条）；私聊照旧回一句短拒收 ——
+    #    但仍然**不入缓存**（D-45 ①：一张图不能把刚发来的作业书 PDF 挤掉）。
     if inbound.message_type == "image":
+        if inbound.chat_type == "group":
+            return Outcome()
         return Outcome(replies=(reply(inbound, replies.IMAGE_REJECTED),))
     if inbound.message_type != "text":
-        return Outcome()
+        return Outcome()                       # audio / media / video / sticker：一贯静默
 
     text = strip_mentions(inbound.text, inbound.mentions).strip()
     if not text:
-        return Outcome()                       # 纯 @ 段 / 空文本：静默，不刷屏
+        # 只 @ 不带文本 → 群内能力清单（§9.1 第 1 条）；空文本 / 纯 @ 段其余情形静默
+        if inbound.chat_type == "group" and inbound.bot_mentioned:
+            return Outcome(replies=(reply(inbound, replies.command_list("group")),))
+        return Outcome()
 
     # 2. 状态优先：裸数字/表单怎么解释，全看 state.json 的 awaiting
     awaiting = (state or {}).get("awaiting")
@@ -119,6 +169,13 @@ def route(
             return register.register_step(inbound.text, inbound, state, now)
         if mode == "silent":
             return Outcome()
+
+    # 2. **U1 @ 门禁**（§4.5 第 5 步）：只拦群聊**文本** —— 资源在第 1 步就分流走掉了。
+    #    登记状态机排在它前面是刻意的：登记表单 @ 的是组员、不会 @ 机器人，
+    #    门禁挡在它前面就会把表单吃掉（§4.3「登记中」那一行 + register.classify()）。
+    if not may_speak(inbound, text, state, roster, now):
+        return Outcome()
+
     if awaiting == "vote":
         # 方向投票窗口（M2，D-35 / D-36）：只认开窗那个群的花名册成员；
         # **不命中一律回退 7 条前缀** —— 窗口开着时「拆解」「作业书」必须照常干活，
@@ -144,6 +201,7 @@ def route(
                     cards=cards,
                     preferences=preferences,
                     assignments=assignments,
+                    direction=direction,
                     now=now,
                     source_title=source_title,
                 ),
@@ -180,6 +238,7 @@ def route(
                     cards=cards,
                     preferences=preferences,
                     assignments=assignments,
+                    direction=direction,
                     now=now,
                     source_title=source_title,
                 ),
@@ -197,6 +256,7 @@ def route(
         cards=cards,
         preferences=preferences,
         assignments=assignments,
+        direction=direction,
         now=now,
         source_title=source_title,
     )
@@ -211,10 +271,11 @@ def _by_prefix(
     cards: Sequence = (),
     preferences: Sequence = (),
     assignments: Sequence = (),
+    direction: dict | None = None,
     now: datetime | None = None,
     source_title: str = "",
 ) -> Outcome:
-    """D-33 的第 3、4 步：8 条前缀精确匹配 → 都不中就是指令列表（T01）。"""
+    """D-33 的第 3、4 步：**9 条**前缀精确匹配 → 都不中就是指令列表（T01）。"""
     text = strip_mentions(inbound.text, inbound.mentions).strip()
 
     if text.startswith("作业书"):
@@ -228,6 +289,11 @@ def _by_prefix(
         # M2：群里 = 起后台生成候选 + 开投票窗口；私聊 = 指出"去群里发"（§2.2）。
         # 前置缺失（没评分点 / 没花名册）都在 vote.command() 里判，**都不起 pipeline**。
         return vote.command(inbound, state, roster, has_rubric=has_rubric, now=now)
+    if any(text.startswith(prefix) for prefix in vote.HUMAN_PREFIXES):
+        # U6 第 9 条：人工拍板方向 = **直接落定 + 署名台账**，不进投票、不起 pipeline
+        # （"是否重拆"由人决定，理由同 D-68：重拆会让 M8 基线与门③复算作废）。
+        # 与 `方向` 不互撞：`我们要做的方向是：X`.startswith("方向") = False（§5.1 硬约束 1）。
+        return vote.human_command(text, inbound, state, roster, direction, now)
     if text.startswith("你想做哪一块"):
         return preference.command(
             inbound, state, cards, roster, preferences, now, source_title=source_title
@@ -244,7 +310,11 @@ def _by_prefix(
         # M7 触发点 = 方案 A（D-64）：只有组长能在群里要报告
         return _report(inbound, roster, assignments)
 
-    return Outcome(replies=(reply(inbound, replies.COMMAND_LIST_TEXT),))
+    # 兜底（D-33 第 4 步）：群聊里**只有被 @ 过**才回清单 —— 没 @ 的已经在门禁处
+    # 静默掉了（§4.5 末条）；私聊沿用 L5，照回。
+    if inbound.chat_type != "group" or inbound.bot_mentioned:
+        return Outcome(replies=(reply(inbound, replies.command_list(inbound.chat_type)),))
+    return Outcome()
 
 
 def _report(inbound: Inbound, roster, assignments: Sequence) -> Outcome:
@@ -346,6 +416,10 @@ def remember_file(inbound: Inbound, state: dict, now: datetime | None = None) ->
     """把 file_key 存进 ``state.pending_file``，等文字消息来配对（D-42）。
 
     只缓存、不下载：下载是 I/O，归 app 层；router 连"要不要下载"都不决定。
+
+    **群聊里只缓存不回话**（U1 闭嘴纪律 + §4.2 的必改项）：群里投作业书是两步
+    （先发文件、再 `@机器人 作业书`），第一步要是插一句"已收到文件"，就直接违反
+    "没被 @ 就不说话"。私聊保留回执 —— 一对一没有噪音问题（L5）。
     """
     name = inbound.file_name or "（未命名文件）"
     pending = {
@@ -356,8 +430,9 @@ def remember_file(inbound: Inbound, state: dict, now: datetime | None = None) ->
         "message_id": inbound.message_id,
         "received_at": (now or datetime.now()).isoformat(timespec="seconds"),
     }
+    announce = inbound.chat_type != "group"
     return Outcome(
-        replies=(reply(inbound, replies.FILE_RECEIVED.format(name=name)),),
+        replies=(reply(inbound, replies.FILE_RECEIVED.format(name=name)),) if announce else (),
         state={**(state or {}), "pending_file": pending},
     )
 

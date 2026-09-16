@@ -25,6 +25,8 @@ def _inbound(text="", **over):
         message_id="m1",
     )
     data.update(over)
+    # U1 门禁：群聊默认"@ 了机器人"—— 升级后这是群里的常态；测门禁本身的用例自己传 False
+    data.setdefault("bot_mentioned", data["chat_type"] != "p2p")
     return Inbound(**data)
 
 
@@ -152,7 +154,8 @@ def test_open_window_does_not_eat_private_commands():
         "有组员提议：加个图表",
         replies.PROPOSAL_ACK,
     ]
-    assert _texts(route(_private("你好"), _state(), **common)) == [replies.COMMAND_LIST_TEXT]
+    # 私聊兜底 = 私聊可用清单（D-76 派生；群内那份包含「方向」「报告」等群里才有的指令）
+    assert _texts(route(_private("你好"), _state(), **common)) == [replies.COMMAND_LIST_DM]
 
 
 def test_bad_numbers_are_rejected_without_writing_anything():
@@ -344,7 +347,7 @@ def test_digits_are_not_preferences_after_the_window_closed():
         now=OPEN,
     )
     assert outcome.save_preference is None
-    assert _texts(outcome) == [replies.COMMAND_LIST_TEXT]
+    assert _texts(outcome) == [replies.COMMAND_LIST_DM]        # 私聊兜底清单（D-76 派生）
 
 
 # ---------- M5 匿名代言（§6.5 / D-55）----------

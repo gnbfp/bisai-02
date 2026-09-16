@@ -6,6 +6,9 @@
 连接层负责把飞书事件翻译成 ``Inbound``（``to_inbound()``），路由层只吃 ``Inbound``、
 只吐 ``Outcome`` —— 这样 §7.1 的整套路由规则可以在没有飞书、没有网络的情况下全量单测。
 
+U1（群聊必须 @）要靠 ``Inbound.bot_mentioned`` / ``Mention.is_bot`` 才判得出来 ——
+两个字段都由 ``to_inbound()`` 从平台的 ``mentioned_type`` 填（§4.5）。
+
 ``to_inbound()`` 放在这里而不是 client.py，就是为了让它也能被单测：它只做
 ``getattr`` 取值，不碰 lark 的对象类型，用假事件对象即可覆盖（含 @ 段、file_key 提取）。
 """
@@ -31,11 +34,17 @@ _RESOURCE_FIELD = {
 
 @dataclass(frozen=True)
 class Mention:
-    """被 @ 到的人。``key`` 是文本里的占位符（如 ``@_user_1``），剥 @段靠它。"""
+    """被 @ 到的人。``key`` 是文本里的占位符（如 ``@_user_1``），剥 @段靠它。
+
+    ``is_bot`` = 这一下 @ 的是**机器人自己**（平台字段 ``mentioned_type == "bot"``，
+    2026-09-15 探针实测有送，见 `docs/evidence/2026-09-15-upgrade-instance-probe.md`）。
+    U1 的「群聊必须 @」门禁只有靠它才能判"这条群消息是不是在跟我说话"。
+    """
 
     key: str = ""
     open_id: str = ""
     name: str = ""
+    is_bot: bool = False
 
 
 @dataclass(frozen=True)
@@ -47,6 +56,9 @@ class Inbound:
     message_type: str = ""         # "text" | "file" | "image" | ...
     text: str = ""
     mentions: tuple[Mention, ...] = ()
+    # U1 门禁（§4.5 第 5 步）：这条**群聊文本**消息 @ 了机器人自己。私聊恒为 False ——
+    # 私聊里根本不存在"@ 机器人"这个动作，所以门禁对 p2p 直接放行（L5 / §4.5 v1.4）。
+    bot_mentioned: bool = False
     sender_open_id: str = ""
     sender_type: str = ""          # "user" | "app"
     message_id: str = ""
@@ -158,8 +170,13 @@ def to_inbound(data) -> Inbound:
                 key=getattr(mention, "key", "") or "",
                 open_id=getattr(getattr(mention, "id", None), "open_id", "") or "",
                 name=getattr(mention, "name", "") or "",
+                is_bot=_is_bot_mention(mention),
             )
             for mention in (getattr(message, "mentions", None) or [])
+        ),
+        # 只要有一个 @ 落在机器人身上，这条群消息就算"在跟机器人说话"（§4.5 第 5 步）
+        bot_mentioned=any(
+            _is_bot_mention(mention) for mention in (getattr(message, "mentions", None) or [])
         ),
         sender_open_id=getattr(getattr(sender, "sender_id", None), "open_id", "") or "",
         sender_type=getattr(sender, "sender_type", "") or "",
@@ -167,6 +184,17 @@ def to_inbound(data) -> Inbound:
         file_key=file_key,
         file_name=str(payload.get("file_name") or ""),
     )
+
+
+def _is_bot_mention(mention) -> bool:
+    """这一下 @ 的是机器人吗？判据 = 平台字段 ``mentioned_type == "bot"``。
+
+    探针实测平台会给（`docs/evidence/2026-09-15-upgrade-instance-probe.md` §2 第 4 条），
+    但代码此前没读它 —— U1 的门禁需要这个字段（§4.5「缺口」）。
+    **认不出来就当不是**：那样这条消息会被门禁静默。这是有意的偏保守选择，
+    @ 识别率与"平台没给 mentioned_type"的兜底形态属未验证项（§4.6）。
+    """
+    return str(getattr(mention, "mentioned_type", "") or "").strip().lower() == "bot"
 
 
 def _post_text(payload: dict) -> str:

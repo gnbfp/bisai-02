@@ -24,6 +24,8 @@
 
 from __future__ import annotations
 
+import difflib
+
 import math
 import re
 from datetime import datetime, timedelta
@@ -35,8 +37,11 @@ from src.gateway.preference import SEAL_WORD
 
 __all__ = [
     "VOTE_TTL",
+    "HUMAN_PREFIXES",
     "read_window",
     "command",
+    "human_command",
+    "exempt",
     "open_window",
     "accept",
     "should_close",
@@ -55,6 +60,16 @@ _SEPARATORS = re.compile(r"[\s,，、]+")
 REASON_MAJORITY = "过半落定"
 REASON_LEADER = "组长拍板"
 REASON_LEADER_AFTER_TIMEOUT = "超时后组长指定"
+REASON_HUMAN = "人工拍板"
+
+# U6 第 9 条前缀（§5.1 第 9 行）：全角 / 半角冒号都认，照 PROPOSAL_PREFIXES 的现成做法。
+HUMAN_PREFIXES = ("我们要做的方向是：", "我们要做的方向是:")
+
+# "跟候选差不多"的归并阈值（§5.3：**代码判定**，不烧 LLM）。归一化后
+# ①互相包含（较短的一方至少 _MERGE_MIN_CHARS 字）或 ②相似度 ≥ _MERGE_RATIO 即算同一个。
+# 两个数都是可复核的常量，正 / 反例见 tests/test_vote.py。
+_MERGE_MIN_CHARS = 4
+_MERGE_RATIO = 0.6
 
 
 def read_window(state: dict, now: datetime | None = None) -> tuple[dict, bool]:
@@ -66,6 +81,29 @@ def read_window(state: dict, now: datetime | None = None) -> tuple[dict, bool]:
     if not block:
         return {}, False
     return block, _expired(block, now)
+
+
+def exempt(
+    text: str, inbound: Inbound, state: dict, roster, now: datetime | None = None
+) -> bool:
+    """免 @ 白名单（§4.4）：投票窗口内、开窗那个群、花名册成员的**纯数字**。
+
+    只回答"这条群消息不 @ 也算数吗"，**不改状态、不发消息** —— 号码怎么解释仍然
+    只有 ``accept()`` 一处（判定不复制）。窗口冻住（``closed``）就不豁免（数字静默不计，
+    只有组长还能「封盘」）；窗口一关 ``awaiting`` / ``vote`` 一起清 ⇒ 门禁立刻恢复（T05）。
+    """
+    block, _ = read_window(state, now)
+    if not block or block.get("closed"):
+        return False
+    group = block.get("chat_id") or (state or {}).get("group_chat_id") or ""
+    if not group or inbound.chat_type != "group" or inbound.chat_id != group:
+        return False
+    if not inbound.sender_open_id:
+        return False
+    known = {member.open_id for member in (getattr(roster, "members", None) or ())}
+    if known and inbound.sender_open_id not in known:
+        return False                      # 非花名册成员：数字静默不计（同 accept()）
+    return bool(_parse_numbers((text or "").strip()))
 
 
 def clear(state: dict) -> dict:
@@ -105,6 +143,71 @@ def command(
         )
     # 没窗口 / 已过期 / 已冻住 → 重新生成候选、开新窗口（§2.2）
     return Outcome(replies=(reply(inbound, replies.VOTE_GENERATING),), pipeline="direction")
+
+
+def human_command(
+    text: str,
+    inbound: Inbound,
+    state: dict,
+    roster,
+    direction: dict | None = None,
+    now: datetime | None = None,
+) -> Outcome:
+    """U6 第 9 条：``我们要做的方向是：X`` —— 人拍板，**直接落定、不进投票**（§5.3）。
+
+    三条硬口径都落在这里：
+
+    1. 与匿名提议**严格分开** —— 人工方向是署名的（``decided_by`` 记 open_id）且进
+       ``direction.json``；``我想提议：`` 仍匿名走 ``proposals.json``（D-74）。
+    2. **覆盖已经定过的方向只有组长能拍**：非组长发来 → 回一句，不落盘、不覆盖。
+    3. **已出的任务卡不自动重拆**：回执里指路「拆解」，由人决定（同 D-68）。
+
+    归并（"跟候选差不多就按候选记"）是代码判定，见 ``_merge_candidate()``。
+    """
+    content = _human_body(text)
+    if not content:
+        return Outcome(replies=(reply(inbound, replies.VOTE_HUMAN_EMPTY),))
+    if inbound.chat_type != "group":
+        # 与「方向」同口径：投票 / 拍板都是群里的动作（T05 原文"回复数字投票"）
+        return Outcome(replies=(reply(inbound, replies.VOTE_HUMAN_NEED_GROUP),))
+    if not list(getattr(roster, "members", None) or ()):
+        return Outcome(replies=(reply(inbound, replies.VOTE_NEED_ROSTER),))
+
+    settled = (direction or {}).get("winner") or {}
+    if settled and inbound.sender_open_id != getattr(roster, "leader", None):
+        return Outcome(replies=(reply(inbound, replies.VOTE_HUMAN_NEED_LEADER),))
+
+    block, _ = read_window(state, now)
+    candidates = _candidates(block) if block else list((direction or {}).get("candidates") or [])
+    hit = _merge_candidate(content, candidates)
+    title = str((hit or {}).get("title") or "") or content
+    payload = {
+        "decided_at": _iso(now or datetime.now()),
+        # 台账字段（§5.3）：source = 这个方向怎么定的；decided_by = 谁定的。
+        # 人工拍板是**署名**：落发起人的 open_id（投票 / 封盘那两条记的是类别：vote / leader）。
+        "source": "human",
+        "decided_by": inbound.sender_open_id,
+        "winner": {
+            "id": _as_int((hit or {}).get("id")),
+            "title": title,
+            "note": str((hit or {}).get("note") or ""),
+        },
+        "candidates": candidates,
+        "votes": dict((block or {}).get("votes") or {}),
+        "tally": {},
+        "reason": REASON_HUMAN,
+    }
+    if hit:
+        reply_text = replies.VOTE_HUMAN_MERGED.format(letter=_letter(hit.get("id")), title=title)
+    else:
+        reply_text = replies.VOTE_HUMAN_SETTLED.format(title=title)
+    group = (state or {}).get("group_chat_id") or inbound.chat_id
+    return Outcome(
+        replies=(Reply(chat_id=group, text=reply_text),),
+        # 落定即关窗：不进投票，裸数字立刻回到门禁之外（T05 的"结束即恢复"）
+        state=clear(state),
+        save_direction=payload,
+    )
 
 
 def open_window(
@@ -248,7 +351,9 @@ def settle(
     winner = _majority_winner(dict(block.get("votes") or {}), candidates, roster)
     if winner is None:
         return None
-    return _settled(state, block, winner, reason=REASON_MAJORITY, decided_by="vote", now=now)
+    return _settled(
+        state, block, winner, reason=REASON_MAJORITY, decided_by="vote", now=now, source="vote"
+    )
 
 
 # ---------- 关闭的三条路 ----------
@@ -299,7 +404,9 @@ def _timeout(
     votes = dict(block.get("votes") or {})
     winner = _majority_winner(votes, candidates, roster)
     if winner is not None:
-        return _settled(state, block, winner, reason=REASON_MAJORITY, decided_by="vote", now=now)
+        return _settled(
+            state, block, winner, reason=REASON_MAJORITY, decided_by="vote", now=now, source="vote"
+        )
     group = block.get("chat_id") or (state or {}).get("group_chat_id") or inbound.chat_id
     return Outcome(
         replies=(
@@ -348,7 +455,9 @@ def _seal(
         pick = int(raw)
 
     reason = REASON_LEADER_AFTER_TIMEOUT if expired else REASON_LEADER
-    return _settled(state, block, pick, reason=reason, decided_by="leader", now=now)
+    return _settled(
+        state, block, pick, reason=reason, decided_by="leader", now=now, source="leader"
+    )
 
 
 def _settled(
@@ -359,6 +468,7 @@ def _settled(
     reason: str,
     decided_by: str,
     now: datetime | None,
+    source: str,
 ) -> Outcome:
     """落 ``data/direction.json``（整份覆盖、裸 JSON）+ 群里报「方向已定」+ 关窗（§2.6）。"""
     candidates = _candidates(block)
@@ -370,6 +480,9 @@ def _settled(
     detail = f"过半：{tally[winner_id]}/{voters} 票" if reason == REASON_MAJORITY else reason
     payload = {
         "decided_at": _iso(now or datetime.now()),
+        # 台账字段（§5.3）：source = 怎么定的（vote 过半 / leader 封盘 / human 人工拍板），
+        # decided_by = 谁定的（投票与封盘记类别，人工拍板记署名的 open_id）。
+        "source": source,
         "decided_by": decided_by,
         "winner": {
             "id": winner_id,
@@ -451,6 +564,48 @@ def _parse_numbers(text: str) -> list[int] | None:
 
 def _is_seal(text: str) -> bool:
     return bool(text) and text.startswith(SEAL_WORD)
+
+
+def _human_body(text: str) -> str:
+    """剥掉 U6 前缀、只 strip 两端 —— **不加工、不总结**（B2 / §6.5 口径）。"""
+    for prefix in HUMAN_PREFIXES:
+        if (text or "").startswith(prefix):
+            return text[len(prefix):].strip()
+    return ""
+
+
+def _normalize(text: str) -> str:
+    """归一化：去空白与标点、统一小写（中文不受影响）。"""
+    return re.sub(r"[\s\W_]+", "", (text or "")).lower()
+
+
+def _merge_candidate(content: str, candidates: Sequence[dict]) -> dict | None:
+    """人工方向跟现有候选"高度重合"吗？重合就返回那个候选（§5.3 的归并）。
+
+    判据可复核、无 LLM：归一化后 ①互相包含（较短的一方 ≥ ``_MERGE_MIN_CHARS`` 字，
+    挡掉"做"这种单字误命中）或 ②``difflib`` 相似度 ≥ ``_MERGE_RATIO``。
+    """
+    target = _normalize(content)
+    if not target:
+        return None
+    for item in candidates or ():
+        title = _normalize(str((item or {}).get("title") or ""))
+        if not title:
+            continue
+        shorter, longer = sorted((target, title), key=len)
+        if len(shorter) >= _MERGE_MIN_CHARS and shorter in longer:
+            return dict(item)
+        if difflib.SequenceMatcher(None, target, title).ratio() >= _MERGE_RATIO:
+            return dict(item)
+    return None
+
+
+def _letter(candidate_id) -> str:
+    """候选编号 → 清单里的字母（1→A / 2→B / 3→C）：U6 回执要说"跟候选 B 差不多"。"""
+    number = _as_int(candidate_id)
+    if number is None or not 1 <= number <= 26:
+        return str(candidate_id)
+    return chr(ord("A") + number - 1)
 
 
 def _as_int(value) -> int | None:

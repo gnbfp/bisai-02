@@ -1,14 +1,31 @@
 """M0 所有对用户可见的文案 —— 集中一处，改词只改这里。
 
-依据：M0 网关方案 §2 / §11、`requirements.md` §7.1（T01 指令列表）/ §7.7（登记）/ §7.5。
+依据：M0 网关方案 §2 / §11、`requirements.md` §7.1（T01 指令列表）/ §7.7（登记）/ §7.5、
+U5「说人话」（`requirements-upgrade.md` §2 U5 + `docs/ARCHITECTURE-UPGRADE.md` §11）。
 
-指令列表按**路由表的 7 条**写（T01 截图原文是"5 条"，口径见 §8.1 待定义-37，按 7 条实现）。
+U5 的四层（§11.2，可机械检查）：
+  ① 事实槽位原样注入 —— 人名 / 任务号 / 时间 / 数字 / 飞书 ``<at user_id="ou_x"></at>`` 语法，
+     永不润色成同义表达；
+  ② 完整句子、口语词序：不写"字段名：值"（``已标记完成：`` / ``花名册已保存：`` 这类结构一处不留）；
+  ③ 群消息 ≤4 行、私聊 ≤6 行，更长的内容进报告 / 图片；
+  ④ 短、直、不修辞：不卖萌、不"您 / 请知悉 / 已受理"、不连发感叹号。
+
+指令清单**不写死条数**（D-76）：由 ``COMMANDS`` 表按作用域派生。当前派生结果 = 群 7 / 私聊 5 /
+路由 9 条；U4 的 3 条变更指令落地后自动变成 8 / 7 / 12，这里一个字都不用改。
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 __all__ = [
     "COMMAND_LIST_TEXT",
+    "COMMAND_LIST_DM",
+    "GROUP",
+    "DM",
+    "Command",
+    "COMMANDS",
+    "command_list",
     "FILE_RECEIVED",
     "FILE_MISSING",
     "IMAGE_REJECTED",
@@ -30,6 +47,11 @@ __all__ = [
     "VOTE_SEAL_NEED_PICK",
     "VOTE_NEED_LEADER",
     "VOTE_GENERATE_FAILED",
+    "VOTE_HUMAN_EMPTY",
+    "VOTE_HUMAN_SETTLED",
+    "VOTE_HUMAN_MERGED",
+    "VOTE_HUMAN_NEED_LEADER",
+    "VOTE_HUMAN_NEED_GROUP",
     "COMPLETE_NEED_DM",
     "COMPLETE_NEED_ASSIGNMENTS",
     "COMPLETE_UNKNOWN",
@@ -71,134 +93,184 @@ __all__ = [
     "REGISTER_LEADER_ONLY",
 ]
 
-COMMAND_LIST_TEXT = (
-    "我只会这几件事：\n"
-    "1. 作业书 —— 先发作业书文件，再回复「作业书」，我抽评分点并拆任务卡\n"
-    "2. 拆解 —— 用现有评分点重跑一次任务拆解\n"
-    "3. 方向 —— 群里发这句，我生成 2–3 个候选选题方向并开投票\n"
-    "4. 你想做哪一块 —— 私聊我发这句，填志愿\n"
-    "5. 我想提议：… —— 私聊我发这句，我匿名转达\n"
-    "6. 完成 T3 —— 私聊我发这句，标记任务完成\n"
-    "7. 登记 —— 群里发「登记」，按我回的表单 @ 人建花名册\n"
-    "8. 报告 —— 组长在群里发这句，我把执行报告 + 甘特图发群"
+GROUP = "group"
+DM = "p2p"
+
+
+@dataclass(frozen=True)
+class Command:
+    """一条顶层前缀 —— 清单文案与"能用在哪"的唯一来源（D-76：条数不写死）。"""
+
+    prefix: str                       # 与 router._by_prefix() 的前缀表逐条对齐（有单测盯着）
+    scopes: tuple[str, ...]           # 生效作用域：GROUP / DM
+    line: str                         # 清单里那一行（序号由 command_list() 加）
+
+    def usable_in(self, scope: str) -> bool:
+        return scope in self.scopes
+
+
+COMMANDS = (
+    Command("作业书", (GROUP, DM), "发作业书文件给我，再回「作业书」—— 我抽评分点、拆任务卡"),
+    Command("拆解", (GROUP, DM), "回「拆解」，我拿现有评分点重拆一遍"),
+    Command("方向", (GROUP,), "群里回「方向」，我出 2–3 个候选方向并开投票"),
+    Command("你想做哪一块", (GROUP, DM), "回「你想做哪一块」，我发任务卡清单给你填志愿"),
+    Command("我想提议：", (DM,), "私聊发「我想提议：…」，我匿名替你转达"),
+    Command("完成 T3", (DM,), "私聊发「完成 T3」，我把这张卡标成做完"),
+    Command("登记", (GROUP,), "群里回「登记」，照我回的表单 @ 人建花名册"),
+    Command("报告", (GROUP,), "组长在群里回「报告」，我发执行报告和甘特图"),
+    Command("我们要做的方向是：", (GROUP,), "群里发「我们要做的方向是：…」，直接定方向，不用投票"),
 )
 
+
+def command_list(scope: str) -> str:
+    """按作用域派生清单 —— 条数**不写死**，从 COMMANDS 数出来（D-76）。"""
+    lines = [
+        f"{index}. {command.line}"
+        for index, command in enumerate(
+            (item for item in COMMANDS if item.usable_in(scope)), start=1
+        )
+    ]
+    return "直接说要做哪件就行：\n" + "\n".join(lines)
+
+
+# 群里 @ 后的"群内可用"清单（T01 的 8 条口径）与私聊兜底清单 —— 两份都是派生的。
+COMMAND_LIST_TEXT = command_list(GROUP)
+COMMAND_LIST_DM = command_list(DM)
+
 # ---- 作业书 / 拆解 主链路 ----
-FILE_RECEIVED = "已收到文件：{name}。回复「作业书」我来解析。"
-FILE_MISSING = "请先把作业书文件发给我，再回复「作业书」。"
-IMAGE_REJECTED = "图片我读不了，作业书请发 PDF / Word / TXT 文件。"
-PARSING = "收到，正在解析作业书，大概需要半分钟…"
-PARSE_FAILED = "解析失败，请检查文件是否是文字版；或回复「作业书」重试。"
-EXTRACT_REJECTED = "这个文件没法用：{reason}"
-DECOMPOSING = "收到，正在用现有评分点重新拆解…"
-NEEDS_RUBRIC = "还没有评分点：先把作业书文件发给我，再回复「作业书」。"
+FILE_RECEIVED = "《{name}》我拿到了，回「作业书」我就开始解析。"
+FILE_MISSING = "我手上还没有作业书文件。先把作业书发进来，再回一次「作业书」。"
+IMAGE_REJECTED = "图片我读不了，作业书发 PDF 或 Word 文件给我。"
+PARSING = "收到，开始解析作业书，大概半分钟。"
+PARSE_FAILED = "这份作业书没解析出来。如果是拍照或扫描的，换成文字版再回一次「作业书」。"
+EXTRACT_REJECTED = "这份文件我读不了：{reason}"
+DECOMPOSING = "收到，拿现有评分点重拆一遍，马上好。"
+NEEDS_RUBRIC = "现在还没有评分点。先把作业书发给我，再回一次「作业书」。"
 NO_RUBRIC_FOUND = (
-    "这份文件里我没找到评分标准（评分表 / 成绩评定 那一小节）。"
-    "为了不瞎拆，我先停在这里 —— 请确认作业书里有没有评分标准，或换一份带评分标准的文件。"
+    "这份文件里我没找到评分标准（就是「评分表」「成绩评定」那一节）。"
+    "为了不瞎拆，我先停在这儿：确认一下作业书里有没有这一节，或者换一份带评分标准的。"
 )
 
 # ---- M2 方向候选 + 群内投票（§7.1 / §7.6 / D-35 / D-36）----
-VOTE_GENERATING = "收到，正在按评分点生成候选方向，大概需要半分钟…"
-VOTE_NEED_GROUP = "投票是群里的动作：请到群里发「方向」。"
-VOTE_NEED_ROSTER = "还没有花名册：先在群里发「登记」建一份，再发「方向」。"
-VOTE_IN_PROGRESS = "方向投票正在进行：还剩 {minutes} 分钟，回复数字投票就行。"
+VOTE_GENERATING = "收到，按评分点想几个候选方向，大概半分钟。"
+VOTE_NEED_GROUP = "方向投票是群里的事，把「方向」发到群里。"
+VOTE_NEED_ROSTER = "还没有花名册。先在群里回「登记」建一份，再回「方向」。"
+VOTE_IN_PROGRESS = "投票还在走，还剩 {minutes} 分钟。直接回数字就行。"
 # 候选文案里这句"仅供参考，由全组拍板"是 §7 验收项，别删。
 VOTE_CANDIDATES = (
     "候选方向（仅供参考，由全组拍板）：\n"
-    "{items}\n\n"
-    "回复数字投票（一人一票，可以改）；10 分钟内过半就定。"
+    "{items}\n"
+    "回复数字投票，一人一票，可以改；10 分钟内过半就定。"
 )
-VOTE_ACK = "记下了：你投的是 {id}. {title}。想改就再发一次数字。"
-VOTE_BAD = "没看懂：候选只有 {ids}，回复其中一个数字就行。"
+VOTE_ACK = "记下了，你投的是 {id}. {title}。想改再回一次数字。"
+VOTE_BAD = "这个数字我没对上，候选只有 {ids}，回其中一个就行。"
 # 超时后窗口只是**冻住**（vote.closed），候选与票数都还在，所以直接让组长拍板就行 ——
 # 别再让人重开一轮：重开会重新生成候选，编号跟这张票数表就对不上了。
 VOTE_TIMEOUT = (
-    "10 分钟到，还没有方向过半：{tally}。数字不再计票。\n"
-    "组长拍板：发「封盘」取票最多的，或「封盘 2」直接指定第 2 个。"
+    "10 分钟到了，还没有方向过半：{tally}。数字不再计票。\n"
+    "组长拍板，回「封盘」取票最多的，或者回「封盘 2」直接指定。"
 )
-VOTE_SETTLED = "方向已定：{id}. {title}（{detail}）。"
-VOTE_SEAL_NEED_PICK = "现在还没有票：组长发「封盘 2」直接指定一个方向（数字是候选编号）。"
+VOTE_SETTLED = "方向定了：{id}. {title}，{detail}。"
+VOTE_SEAL_NEED_PICK = "现在还没有票。组长回「封盘 2」直接指定一个方向，数字是候选编号。"
 VOTE_NEED_LEADER = "只有组长能封盘。"
-VOTE_GENERATE_FAILED = "候选方向没生成出来（模型输出不合要求），稍后再发一次「方向」。"
+VOTE_GENERATE_FAILED = "候选方向没生成出来。过一会儿再回一次「方向」，我重试。"
+
+# ---- U6 人工拍板方向（§5.3 / D-74）----
+VOTE_HUMAN_EMPTY = (
+    "「我们要做的方向是：」后面得写上方向，"
+    "比如「我们要做的方向是：做个校园二手书平台」。"
+)
+VOTE_HUMAN_SETTLED = "方向定了：{title}。要重拆任务卡就回「拆解」，我不会自动重拆。"
+VOTE_HUMAN_MERGED = (
+    "这句跟候选 {letter} 差不多，我就按候选 {letter} 记了：{title}。"
+    "要重拆任务卡就回「拆解」。"
+)
+VOTE_HUMAN_NEED_LEADER = "方向已经定过了，改方向得组长来发这句。"
+VOTE_HUMAN_NEED_GROUP = "方向是群里的事，这句发到群里。"
 
 # ---- M6 完成标记（§7.1 第 6 条 / D-22 / D-31）----
-COMPLETE_NEED_DM = "这条要私聊我发：私聊发「完成 T3」我就给你标上。"
-COMPLETE_NEED_ASSIGNMENTS = "还没有分配：先在群里发「你想做哪一块」，拿到的卡才能标完成。"
+COMPLETE_NEED_DM = "这条私聊发我就行：私聊发「完成 T3」。"
+COMPLETE_NEED_ASSIGNMENTS = "现在还没有分配。先在群里回「你想做哪一块」，拿到卡才能标完成。"
 # 不是你的卡 / 没这张卡时，都**列出他自己领到的卡** —— 不许给假确认（§6.3 的口径）
-COMPLETE_UNKNOWN = "没有 T{index} 这张任务卡。{mine}"
+COMPLETE_UNKNOWN = "没有 T{index} 这张卡。{mine}"
 COMPLETE_NOT_YOURS = "T{index} 不是我分给你的卡，我不能替你标。{mine}"
-COMPLETE_MINE = "你手上的是：{tasks}。"
-COMPLETE_MINE_NONE = "你手上现在没有任务卡。"
-COMPLETE_OK = "已标记完成：{task_id}（{module}）。"
-COMPLETE_ALREADY = "{task_id} 之前就标过了（{at}），我没改时间。"
+COMPLETE_MINE = "你现在手上的卡是 {tasks}。"
+COMPLETE_MINE_NONE = "你现在手上没有卡。"
+COMPLETE_OK = "收到，{task_id}（{module}）算你做完了。"
+COMPLETE_ALREADY = "{task_id} 之前就标过了（{at}），时间我没动。"
 
 # ---- M6 临期催办（§2.2；两档 = 待定义-35，逾期档 = D-66）----
 # ``{at}`` 是飞书的 @ 语法 ``<at user_id="ou_x"></at>``，写成纯文本 @某人 不会真 @。
 REMIND_DUE = (
-    "{at} 你的「{module}」还差 {hours} 小时到截止（{deadline}），"
+    "{at} 你的「{module}」还差 {hours} 小时到截止（{deadline}）。"
     "做完私聊我发「完成 {task_id}」。"
 )
 REMIND_OVERDUE = (
-    "{at} 你的「{module}」已经逾期了（截止 {deadline}），"
+    "{at} 你的「{module}」已经逾期了（截止 {deadline}）。"
     "做完私聊我发「完成 {task_id}」。"
 )
 
 # ---- M7 执行报告（D-64）----
-REPORT_NEED_GROUP = "报告是群里的动作：请到群里发「报告」。"
-REPORT_NEED_ROSTER = "还没有花名册：先在群里发「登记」建一份，再发「报告」。"
+REPORT_NEED_GROUP = "报告是群里的事，把「报告」发到群里。"
+REPORT_NEED_ROSTER = "还没有花名册。先在群里回「登记」，再回「报告」。"
 REPORT_NEED_LEADER = "只有组长能要报告。"
-REPORT_NEED_ASSIGNMENTS = "还没有分配：先在群里发「你想做哪一块」，分配完再发「报告」。"
-REPORT_GENERATING = "收到，正在生成执行报告（总表 + 核对清单 + 甘特图），马上发群…"
-REPORT_FAILED = "执行报告没生成出来（渲染出错），稍后再发一次「报告」。"
-IMAGE_SEND_FAILED = "甘特图没发出去（网络问题），上面的文字版先到；稍后再发一次「报告」我补一张。"
+REPORT_NEED_ASSIGNMENTS = "现在还没有分配。先在群里回「你想做哪一块」，分完再回「报告」。"
+REPORT_GENERATING = "收到，开始出执行报告（分配总表 / 核对清单 / 甘特图），好了就发群。"
+REPORT_FAILED = "报告没出成，渲染的时候出错了。过一会儿再回一次「报告」，我重试。"
+IMAGE_SEND_FAILED = "甘特图没发出去，网络出了问题。上面的文字先看，过一会儿回一次「报告」我补一张。"
 
 # ---- M4 志愿分配（§7.1 / D-52~D-54）----
 PREFERENCE_LIST = (
-    "任务卡清单（回复序号即可，想排序就按优先级发，例如「2 1」）：\n"
+    "任务卡清单，回序号就行，想排顺序就按优先级发，比如「2 1」：\n"
     "{items}"
 )
-PREFERENCE_SAVED = "记下了：你的志愿是 {tasks}。想改就再发一次序号。"
-PREFERENCE_BAD = "序号我没看懂。我看到的是 {tasks}，重发一次序号就行。"
-PREFERENCE_NEED_CARDS = "还没有任务卡：先把作业书文件发给我，回「作业书」拆出任务卡。"
-PREFERENCE_NEED_ROSTER = "还没有花名册：先在群里发「登记」建一份，再发「你想做哪一块」。"
-PREFERENCE_NOT_MEMBER = "我这份花名册里没有你：先在群里「登记」把你自己 @ 进去，再私聊我填志愿。"
+PREFERENCE_SAVED = "记下了，你的志愿是 {tasks}。想改再回一次序号。"
+PREFERENCE_BAD = "序号我没看懂。我这边看到的是 {tasks}，重发一次就行。"
+PREFERENCE_NEED_CARDS = "现在还没有任务卡。先把作业书发给我，回「作业书」拆出卡。"
+PREFERENCE_NEED_ROSTER = "还没有花名册。先在群里回「登记」，再回「你想做哪一块」。"
+PREFERENCE_NOT_MEMBER = "这份花名册里没有你。先在群里回「登记」把自己 @ 进去，再私聊我填志愿。"
 # 组长重发「你想做哪一块」不再直接封盘（P0-B / D-56）：有人交过就先确认一次，
 # 免得"为了再发一遍清单"顺手把窗口关了、不可撤回。
 PREFERENCE_CONFIRM_SEAL = (
-    "现在封盘会按已有 {done} 份志愿分配，还有 {missing} 人没交。"
-    "回复「封盘」确认，回复别的继续等。"
+    "现在封盘的话，就按已经交的 {done} 份志愿分配，还有 {missing} 人没交。"
+    "回「封盘」确认，回别的就继续等。"
 )
 # 主动私聊发不出去时，在群里把话说清楚（P0-C），别"群里说已发、实际没人收到"。
 PREFERENCE_DM_FAILED = (
-    "有 {count} 人我没能私聊到。请这几位私聊我发「你想做哪一块」，我单独回你清单。"
+    "有 {count} 个人我没私聊到。这几位私聊我发「你想做哪一块」，我把清单单独发给你。"
 )
 
 # 主动发群 / 私聊的前置：机器人得先见过至少一条群消息，才知道"群"是哪个（D-54）。
-NEED_GROUP = "我还没认下群：先在群里发一次指令（例如「作业书」），我认一下群。"
+NEED_GROUP = "我还不知道你是哪个群的。先在群里发一次指令，比如「作业书」，我就认下这个群。"
 
 # ---- M5 匿名代言（§6.5 / D-55）----
 PROPOSAL_POSTED = "有组员提议：{text}"
 PROPOSAL_ACK = "已经匿名发到群里了。"
-PROPOSAL_EMPTY = "「我想提议：」后面要写上内容，例如「我想提议：前端用 React」。"
-PROPOSAL_NOT_MEMBER = "你不在这份花名册里：先在群里「登记」把自己 @ 进去，再来找我提议。"
+PROPOSAL_EMPTY = "「我想提议：」后面得写上内容，比如「我想提议：前端用 React」。"
+PROPOSAL_NOT_MEMBER = "这份花名册里没有你。先在群里回「登记」把自己 @ 进去，再来找我提议。"
 
 # ---- 登记（§7.7）----
+# 这一段是**表单模板**：用户要照着它把「登记 / 组长 / 组员」三行发回来，
+# 所以格式与词头不动（``register._FORM_LINE`` 认的就是这几个词）。
 REGISTER_FORM = (
-    "请照这个样子填，@到每个人：\n"
+    "照这个样子填，把人 @ 上：\n"
     "登记\n"
     "组长：@某人\n"
     "组员：@某人 @某人 @某人"
 )
 REGISTER_FORM_BAD = (
-    "表单没看懂。请照下面这个格式重发一遍（**必须用 @ 人**，不要打名字）：\n\n" + REGISTER_FORM
+    "表单我没看懂。照下面这个格式重发一遍 —— 要用 @ 选人，别直接打名字：\n\n" + REGISTER_FORM
 )
-REGISTER_NEED_LEADER = "表单里「组长」要正好 1 个人，请改完重发一次。"
-REGISTER_NEED_MEMBERS = "表单里「组员」至少 2 个人，请改完重发一次。"
+REGISTER_NEED_LEADER = "「组长」那一行要正好 1 个人，改完重发一次。"
+REGISTER_NEED_MEMBERS = "「组员」那一行至少 2 个人，改完重发一次。"
+# 表单回显也只有 4 行（§11.2 ③：群消息 ≤4 行，回显不是例外）。
 REGISTER_CONFIRM = (
-    "我读到的是：\n组长：{leader}\n组员：{members}（含组长共 {total} 人）\n\n"
-    "回复「同意」保存，回复别的就作废。"
+    "我读到的是这样：\n"
+    "组长：{leader}\n"
+    "组员：{members}（含组长共 {total} 人）\n"
+    "回「同意」我就存，回别的作废。"
 )
-REGISTER_SAVED = "花名册已保存：组长 {leader}，含组长共 {total} 人。"
-REGISTER_CANCELLED = "已作废，原有名单没动。"
-REGISTER_EXPIRED = "登记超时作废了，原有名单没动。要登记请再发一次「登记」。"
-REGISTER_LEADER_ONLY = "已有花名册，只有组长能重开登记。"
+REGISTER_SAVED = "花名册存好了，组长是 {leader}，含组长一共 {total} 人。"
+REGISTER_CANCELLED = "这次作废了，原来的名单没动。"
+REGISTER_EXPIRED = "登记超时作废了，原来的名单没动。要登记就再回一次「登记」。"
+REGISTER_LEADER_ONLY = "已经有花名册了，重新登记只有组长能开。"

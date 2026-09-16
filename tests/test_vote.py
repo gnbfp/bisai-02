@@ -63,6 +63,8 @@ def _inbound(text="", **over):
         message_id="m1",
     )
     data.update(over)
+    # U1 门禁：群聊默认"@ 了机器人"—— 升级后这是群里的常态；测门禁本身的用例自己传 False
+    data.setdefault("bot_mentioned", data["chat_type"] != "p2p")
     return Inbound(**data)
 
 
@@ -207,7 +209,8 @@ def test_a_stranger_cannot_push_the_direction_over_the_line():
 def test_private_digit_is_not_a_vote_and_falls_through_to_the_prefixes():
     outcome = route(_private("2"), _state(), _roster(), now=OPEN)
     assert outcome.state is None
-    assert _texts(outcome) == [replies.COMMAND_LIST_TEXT]
+    # 私聊兜底回的是**私聊可用**那份清单（D-76：按作用域派生，两份不是同一张表）
+    assert _texts(outcome) == [replies.COMMAND_LIST_DM]
 
 
 def test_out_of_range_digit_is_rejected_without_writing():
@@ -255,7 +258,7 @@ def test_two_voters_on_the_same_direction_settle_it():
     assert len(outcome.replies) == 2            # 先回执，再落定
     settled = outcome.replies[-1]
     assert settled.chat_id == GROUP
-    assert "方向已定" in settled.text
+    assert "方向定了" in settled.text
     assert CANDIDATES[1]["title"] in settled.text
     assert "2/2" in settled.text
 
@@ -355,11 +358,17 @@ def test_timeout_is_closed_by_the_assignment_command_too():
     assert outcome.state["vote"]["closed"] is True
 
 
-def test_timeout_with_an_empty_message_stays_silent():
-    """纯 @ 段 / 空文本不算"到达的消息"：不发明细、不崩、什么都不动。"""
+def test_timeout_with_an_empty_message_does_not_close_the_window():
+    """空文本 / 纯 @ 段不算"到达的消息"：不发明细、不冻窗口、什么都不动（§4.4）。
+
+    升级后"只 @ 不带文本"在群里会回一句能力清单（§9.1 第 1 条），但它**不进状态机** ——
+    窗口该开还开着，等下一条真消息来收口。
+    """
     state = _state(opened_at=OPEN - timedelta(minutes=11), votes={"ou_li": 1})
-    assert route(_inbound("@_user_1"), state, _roster(), now=OPEN) == Outcome()
-    assert route(_inbound("   "), state, _roster(), now=OPEN) == Outcome()
+    for text in ("@_user_1", "   "):
+        empty = route(_inbound(text), state, _roster(), now=OPEN)
+        assert _texts(empty) == [replies.COMMAND_LIST_TEXT], text
+        assert empty.state is None                # 状态一个字没动
 
 
 # ---------- 冻住的窗口（M2 复核 P1）----------
@@ -528,3 +537,118 @@ def test_register_begin_clears_vote_residue():
     outcome = route(_inbound("登记", sender_open_id=LEADER), _state(), _roster(), now=OPEN)
     assert outcome.state["awaiting"] == "register"
     assert outcome.state["vote"] is None
+
+
+# ---------- U6 人工拍板方向（§5.3 / D-74）----------
+
+
+def _human(text, **over):
+    return _inbound("我们要做的方向是：" + text, **over)
+
+
+def test_human_direction_settles_without_voting():
+    """一句话直接落定：不进投票、不留窗口、台账记 source=human + 署名。"""
+    outcome = route(_human("做个校园二手书平台", sender_open_id="ou_li"), {}, _roster(), now=OPEN)
+
+    payload = outcome.save_direction
+    assert payload["winner"]["title"] == "做个校园二手书平台"
+    assert payload["source"] == "human"
+    assert payload["decided_by"] == "ou_li"                  # 署名，不是 "vote"/"leader"
+    assert payload["reason"] == "人工拍板"
+    assert payload["decided_at"] == OPEN.isoformat(timespec="seconds")
+    assert outcome.state["awaiting"] is None                 # 不进投票
+    assert outcome.save_proposal is None                     # 与匿名提议严格分开
+    assert "方向定了" in _texts(outcome)[0]
+    assert "做个校园二手书平台" in _texts(outcome)[0]        # 事实槽位原样输出
+
+
+def test_human_direction_accepts_a_halfwidth_colon():
+    outcome = route(_inbound("我们要做的方向是:做个刷题小程序"), {}, _roster(), now=OPEN)
+    assert outcome.save_direction["winner"]["title"] == "做个刷题小程序"
+
+
+def test_human_direction_merges_into_an_existing_candidate():
+    """与候选高度重合 → 回"跟候选 A 差不多"，并按候选项记（§5.3 的归并）。"""
+    outcome = route(
+        _human("做一个校园二手交易平台", sender_open_id="ou_li"), _state(), _roster(), now=OPEN
+    )
+    payload = outcome.save_direction
+    assert payload["winner"]["id"] == 1
+    assert payload["winner"]["title"] == "做一个校园二手交易平台"
+    assert payload["candidates"] == CANDIDATES                # 候选保留为历史
+    assert "候选 A" in _texts(outcome)[0]
+
+
+def test_human_direction_merges_on_a_contained_title():
+    """正例之二：归一化后**互相包含**也算重合（子串判据）。"""
+    outcome = route(_human("校园二手交易平台"), _state(), _roster(), now=OPEN)
+    assert outcome.save_direction["winner"]["id"] == 1
+
+
+def test_human_direction_does_not_merge_an_unrelated_title():
+    """反例：不像就不并（阈值是代码判定，不靠感觉）。"""
+    outcome = route(_human("做个食堂排队小程序"), _state(), _roster(), now=OPEN)
+    assert outcome.save_direction["winner"]["id"] is None
+    assert "差不多" not in _texts(outcome)[0]
+
+
+def test_empty_human_direction_asks_for_the_body():
+    outcome = route(_human("   "), {}, _roster(), now=OPEN)
+    assert _texts(outcome) == [replies.VOTE_HUMAN_EMPTY]
+    assert outcome.save_direction is None                     # 不落盘
+
+
+def test_human_direction_in_private_points_to_the_group():
+    outcome = route(
+        _human("做个小工具", chat_type="p2p", chat_id="p1", sender_open_id="ou_li"),
+        {},
+        _roster(),
+        now=OPEN,
+    )
+    assert _texts(outcome) == [replies.VOTE_HUMAN_NEED_GROUP]
+    assert outcome.save_direction is None
+
+
+def test_human_direction_needs_a_roster():
+    assert _texts(route(_human("做个小工具"), {}, None, now=OPEN)) == [replies.VOTE_NEED_ROSTER]
+
+
+def test_overwriting_a_settled_direction_needs_the_leader():
+    """硬口径①：已有落定方向时，改方向是组长的动作（非组长不落盘、不覆盖）。"""
+    settled = {"winner": {"id": 1, "title": "老方向", "note": ""}, "candidates": CANDIDATES}
+
+    member = route(
+        _human("换个方向做", sender_open_id="ou_li"), {}, _roster(), direction=settled, now=OPEN
+    )
+    assert _texts(member) == [replies.VOTE_HUMAN_NEED_LEADER]
+    assert member.save_direction is None
+
+    leader = route(
+        _human("换个方向做", sender_open_id=LEADER), {}, _roster(), direction=settled, now=OPEN
+    )
+    assert leader.save_direction["winner"]["title"] == "换个方向做"
+    assert leader.save_direction["decided_by"] == LEADER
+
+
+def test_human_direction_never_starts_a_heavy_job():
+    """硬口径②：不自动重拆 —— 回执里指路「拆解」，重活由人发起（同 D-68）。"""
+    outcome = route(_human("做个小工具"), {}, _roster(), now=OPEN)
+    assert outcome.pipeline == ""
+    assert "拆解" in _texts(outcome)[0]
+
+
+def test_vote_settled_payload_carries_the_ledger_source():
+    """U6 的台账字段同时给投票路径落上（source=vote / leader），口径才统一。"""
+    state = _state(votes={"ou_zhang": 1})
+    outcome = route(_inbound("1", sender_open_id="ou_li"), state, _roster(), now=OPEN)
+    assert outcome.save_direction["source"] == "vote"
+    assert outcome.save_direction["decided_by"] == "vote"
+
+
+def test_exempt_only_answers_the_open_window_group():
+    """``exempt()`` 是门禁的判据，本身也不改状态、不发消息。"""
+    block = _state()
+    assert vote.exempt("2", _inbound("2", sender_open_id="ou_li"), block, _roster(), OPEN)
+    assert not vote.exempt("2", _private("2", sender="ou_stranger"), block, _roster(), OPEN)
+    assert not vote.exempt("拆解", _inbound("拆解"), block, _roster(), OPEN)
+    assert not vote.exempt("2", _inbound("2"), _frozen(), _roster(), OPEN)

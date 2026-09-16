@@ -175,6 +175,8 @@ def _inbound(text="", **over):
         message_id=f"m{next(_MSG_SEQ)}",
     )
     data.update(over)
+    # U1 门禁：群聊默认"@ 了机器人"—— 升级后这是群里的常态；测门禁本身的用例自己传 False
+    data.setdefault("bot_mentioned", data["chat_type"] != "p2p")
     return Inbound(**data)
 
 
@@ -206,7 +208,7 @@ def test_file_message_is_cached_with_resource_type(env):
     pending = store.load_state()["pending_file"]
     assert pending["file_key"] == "fk_9"
     assert pending["resource_type"] == "file"
-    assert "a.pdf" in sender.texts[0]
+    assert sender.texts == []                     # U1：群里静默缓存，回执只在私聊（§4.2）
 
 
 def test_assignment_pipeline_writes_data_and_posts_checklist(env):
@@ -346,7 +348,7 @@ def test_register_confirm_writes_members_json(env):
     assert roster.leader == "ou_zhang"
     assert [m.open_id for m in roster.members] == ["ou_zhang", "ou_li"]
     assert store.load_state()["awaiting"] is None
-    assert "已保存" in sender.texts[0]
+    assert "花名册存好了" in sender.texts[0]      # U5 改词：不再"已保存："表格腔
 
 
 def test_bot_message_is_ignored_entirely(env):
@@ -627,7 +629,7 @@ def test_direction_window_settles_and_writes_direction_json(env):
     assert payload["decided_by"] == "vote"
     assert payload["reason"] == "过半落定"
     assert store.load_state()["awaiting"] is None
-    assert "方向已定" in sender.texts[-1]
+    assert "方向定了" in sender.texts[-1]
 
 
 def test_direction_pipeline_without_rubric_says_so(env):

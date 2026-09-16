@@ -25,6 +25,8 @@ def _inbound(text="", **over):
         message_id="m1",
     )
     data.update(over)
+    # U1 门禁：群聊默认"@ 了机器人"—— 升级后这是群里的常态；测门禁本身的用例自己传 False
+    data.setdefault("bot_mentioned", data["chat_type"] != "p2p")
     return Inbound(**data)
 
 
@@ -84,20 +86,51 @@ def test_bot_own_message_is_dropped():
     assert outcome == Outcome()
 
 
-def test_file_message_is_cached_not_processed():
+def test_group_file_message_is_cached_silently():
+    """U1 闭嘴纪律（§4.2 的必改项）：群里发文件只写缓存，**一个字都不回**。
+
+    群里投作业书是两步（先发文件、再 ``@机器人 作业书``）：第一步要是回一句"已收到"，
+    就直接违反"没被 @ 就不说话"。
+    """
     inbound = _inbound("", message_type="file", file_key="fk_1", file_name="作业书.pdf")
     outcome = route(inbound, {"awaiting": None}, None)
     assert outcome.state["pending_file"]["file_key"] == "fk_1"
-    assert "作业书.pdf" in _texts(outcome)[0]
+    assert _texts(outcome) == []                    # 静默缓存
     assert outcome.download_file_key == ""          # 下载归 app 层
 
 
-def test_image_gets_a_rejection_reply():
-    """用户 2026-09-12 拍板：图片回一句短拒收，但仍然**不入缓存**。"""
+def test_private_file_message_still_acks():
+    """私聊保留回执（L5）：一对一没有噪音问题，D-45 的"已收到"仍然有用。"""
+    inbound = _inbound(
+        "",
+        chat_type="p2p",
+        chat_id="p1",
+        message_type="file",
+        file_key="fk_1",
+        file_name="作业书.pdf",
+    )
+    outcome = route(inbound, {"awaiting": None}, None)
+    assert outcome.state["pending_file"]["file_key"] == "fk_1"
+    assert _texts(outcome) == [replies.FILE_RECEIVED.format(name="作业书.pdf")]
+
+
+def test_group_image_is_silent_and_not_cached():
+    """群内图片**静默**（本轮口径改写，§12.3 第 13 条），且不入缓存（D-45 ①）。"""
     outcome = route(_inbound("", message_type="image", file_key="ik_1"), {}, None)
-    assert _texts(outcome) == [replies.IMAGE_REJECTED]
+    assert _texts(outcome) == []
     assert outcome.state is None                    # 不写 state ⇒ 缓存没被动过
     assert outcome.pipeline == ""
+
+
+def test_private_image_gets_a_rejection_reply():
+    """私聊保留拒收回执：D-45 的"不再静默"只在私聊成立。"""
+    outcome = route(
+        _inbound("", chat_type="p2p", chat_id="p1", message_type="image", file_key="ik_1"),
+        {},
+        None,
+    )
+    assert _texts(outcome) == [replies.IMAGE_REJECTED]
+    assert outcome.state is None
 
 
 def test_image_does_not_evict_a_cached_file():
@@ -369,7 +402,9 @@ def test_register_form_sees_raw_text_with_mention_placeholders():
 
 
 def test_number_outside_waiting_state_is_not_a_command():
+    """空闲态的裸数字：@ 了 → 兜底清单；没 @ → 门禁静默（§4.3 矩阵"无 @ 纯数字"）。"""
     assert _texts(route(_inbound("2"), {}, None)) == [replies.COMMAND_LIST_TEXT]
+    assert _texts(route(_inbound("2", bot_mentioned=False), {}, None)) == []
 
 
 # ---------- 登记窗口不是死锁（必修 1）----------
@@ -494,10 +529,16 @@ def test_expired_window_is_still_cleared_by_a_stranger_with_a_mention():
 # ---------- 边界 ----------
 
 
-def test_empty_and_mention_only_text_are_silent():
-    assert route(_inbound(""), {}, None) == Outcome()
-    assert route(_inbound("   "), {}, None) == Outcome()
-    assert route(_inbound("@_user_1"), {}, None) == Outcome()
+def test_mention_only_text_gets_the_group_list():
+    """§9.1 第 1 条：群里只 @ 不带文本 → 回"群内可用"清单。"""
+    assert _texts(route(_inbound("@_user_1"), {}, None)) == [replies.COMMAND_LIST_TEXT]
+
+
+def test_empty_text_without_a_mention_stays_silent():
+    """没 @ 的空文本 / 纯空白：一个字都不回（门禁之外的静默）。"""
+    assert route(_inbound("", bot_mentioned=False), {}, None) == Outcome()
+    assert route(_inbound("   ", bot_mentioned=False), {}, None) == Outcome()
+    assert route(_inbound("", chat_type="p2p", chat_id="p1"), {}, None) == Outcome()
 
 
 def test_prefix_tolerates_surrounding_spaces():
@@ -633,3 +674,128 @@ def test_member_proposal_is_still_relayed():
     )
     assert "有组员提议：加一个图表" in _texts(outcome)
     assert outcome.save_proposal["user_id"] == "ou_li"
+
+
+# ---------- U1 @ 门禁（§4.3 矩阵 / §4.4 白名单 / §4.5 插入位置）----------
+
+
+def _vote_state(group="c1", closed=False):
+    """一个开着的投票窗口（三个候选、还没人投）。"""
+    return {
+        "awaiting": "vote",
+        "group_chat_id": group,
+        "vote": {
+            "chat_id": group,
+            "opened_at": NOW.isoformat(timespec="seconds"),
+            "opened_by": "ou_zhang",
+            "candidates": [
+                {"id": 1, "title": "A 方向", "note": ""},
+                {"id": 2, "title": "B 方向", "note": ""},
+                {"id": 3, "title": "C 方向", "note": ""},
+            ],
+            "votes": {},
+            "closed": closed,
+        },
+    }
+
+
+def _preference_state(group="c1"):
+    return {
+        "awaiting": "preference",
+        "group_chat_id": group,
+        "preference": {"chat_id": group, "opened_at": NOW.isoformat(timespec="seconds")},
+    }
+
+
+def _nobody(text, **over):
+    """一条**没 @** 的群消息（U1 的常态输入）。"""
+    return _inbound(text, bot_mentioned=False, **over)
+
+
+def test_group_text_without_a_mention_is_silent():
+    """主线：群里没 @ 就不说话 —— 闲聊 / 指令 / 封盘一视同仁。"""
+    _, roster = _m4_fixtures()
+    assert route(_nobody("今天天气不错"), {}, roster) == Outcome()
+    assert route(_nobody("拆解"), {}, roster, has_rubric=True) == Outcome()
+    assert route(_nobody("封盘"), {}, roster) == Outcome()
+    assert route(_nobody("2"), _preference_state(), roster, now=NOW) == Outcome()
+
+
+def test_private_text_is_never_gated():
+    """L5：私聊不套 @ 规则（私聊的 bot_mentioned 恒为 False）。"""
+    outcome = route(
+        _inbound("拆解", chat_type="p2p", chat_id="p1", bot_mentioned=False),
+        {},
+        None,
+        has_rubric=True,
+    )
+    assert _texts(outcome) == [replies.DECOMPOSING]
+
+
+def test_vote_whitelist_counts_a_member_digit():
+    """投票中 + 开窗群 + 花名册成员：纯数字免 @ 计票（§4.4）。"""
+    _, roster = _m4_fixtures()
+    outcome = route(_nobody("2", sender_open_id="ou_li"), _vote_state(), roster, now=NOW)
+    assert outcome.state["vote"]["votes"] == {"ou_li": 2}
+    assert _texts(outcome) == [replies.VOTE_ACK.format(id=2, title="B 方向")]
+
+
+def test_vote_whitelist_rejects_a_stranger():
+    """非花名册成员：数字静默不计（连票都不记）。"""
+    _, roster = _m4_fixtures()
+    outcome = route(_nobody("2", sender_open_id="ou_stranger"), _vote_state(), roster, now=NOW)
+    assert outcome == Outcome()
+
+
+def test_vote_whitelist_is_scoped_to_the_window_group():
+    """限开窗那个群：别的群的裸数字静默（§4.4 的生效条件）。"""
+    _, roster = _m4_fixtures()
+    outcome = route(
+        _nobody("2", chat_id="c_other", sender_open_id="ou_li"), _vote_state(), roster, now=NOW
+    )
+    assert outcome == Outcome()
+
+
+def test_frozen_window_does_not_exempt_digits():
+    """窗口冻住后数字不再计票（组长仍可「封盘」，见下一条）。"""
+    _, roster = _m4_fixtures()
+    outcome = route(_nobody("2", sender_open_id="ou_li"), _vote_state(closed=True), roster, now=NOW)
+    assert outcome == Outcome()
+
+
+def test_seal_is_exempt_for_the_leader_only():
+    """「封盘」在投票 / 志愿窗口内免 @，但只认组长（§4.4 词表）。"""
+    _, roster = _m4_fixtures()
+    state = _vote_state()
+    state["vote"]["votes"] = {"ou_li": 1, "ou_wang": 1}       # 有票才拍得动（否则是 SEAL_NEED_PICK）
+
+    leader = route(_nobody("封盘", sender_open_id="ou_zhang"), state, roster, now=NOW)
+    assert leader.save_direction is not None                 # 组长：按票最多的拍板
+    assert leader.save_direction["winner"]["id"] == 1
+
+    member = route(_nobody("封盘", sender_open_id="ou_li"), state, roster, now=NOW)
+    assert member == Outcome()                               # 旁人：静默
+
+
+def test_gate_is_restored_right_after_the_window_closes():
+    """T05 的单验：投完（窗口一关）无 @ 的裸数字必须立刻回到门禁之外。"""
+    _, roster = _m4_fixtures()
+    state = _vote_state()
+    state["vote"]["votes"] = {"ou_zhang": 1}
+    settled = route(_nobody("1", sender_open_id="ou_li"), state, roster, now=NOW)
+    assert settled.state["awaiting"] is None                 # 两人投 1 号 ⇒ 过半落定
+    after = route(_nobody("1"), settled.state, roster, now=NOW)
+    assert after == Outcome()                                # 门禁已恢复：不记票、不回话
+
+
+def test_bot_mention_beats_the_gate():
+    """@ 了机器人：任何窗口状态下都照常走前缀（D-33）。"""
+    _, roster = _m4_fixtures()
+    outcome = route(_inbound("拆解"), _vote_state(), roster, has_rubric=True, now=NOW)
+    assert _texts(outcome) == [replies.DECOMPOSING]
+
+
+def test_fallback_list_only_answers_a_mentioned_group_message():
+    """§4.5 末条：兜底清单只在被 @ 时回；没 @ 的群消息一个字都不回。"""
+    assert _texts(route(_inbound("今天天气不错"), {}, None)) == [replies.COMMAND_LIST_TEXT]
+    assert route(_nobody("今天天气不错"), {}, None) == Outcome()
