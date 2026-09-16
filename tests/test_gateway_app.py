@@ -1353,3 +1353,42 @@ def test_reassign_lands_in_the_ledger_and_survives_the_next_settlement(env):
         store, [{"task_id": "T1", "assignee": "ou_li", "source": "volunteer_1"}]
     )
     assert store.load_assignments()[0].assignee == "ou_wang"
+
+
+def test_released_card_goes_back_to_the_pool_and_is_announced(env):
+    """U4 的 A 方案闭环（§8.1）：组长改派 → 被指派人私聊退回 ⇒ 卡回待认领 + 群公示。"""
+    gateway, store, sender, _ = env
+    store.save_members(
+        Roster(
+            leader="ou_zhang",
+            members=[
+                Member(open_id="ou_zhang", name="张三"),
+                Member(open_id="ou_b", name="小李"),
+                Member(open_id="ou_wang", name="王五"),
+            ],
+            registered_at="2026-09-13T09:00:00",
+            confirmed_by="ou_zhang",
+        )
+    )
+    store.save_assignments(
+        [AssignmentRecord(task_id="T1", assignee="ou_b", source="volunteer_1")]
+    )
+
+    gateway.handle(
+        _inbound(
+            "我不做了 T1",
+            chat_type="p2p",
+            chat_id="dm1",
+            sender_open_id="ou_b",
+        )
+    )
+
+    record = store.load_assignments()[0]
+    assert record.assignee == ""                       # 回流池 = assignee 为空（§8.3）
+    assert record.source == "volunteer_1"              # source 不动
+    assert [(c.kind, c.from_user, c.to_user) for c in store.load_changes()] == [
+        ("release", "ou_b", "")
+    ]
+    assert sender.sent[0].chat_id == "dm1"             # 先回本人
+    assert sender.sent[-1].chat_id == "c1"             # 再播群公示
+    assert "小李 退出了 T1" in sender.sent[-1].text

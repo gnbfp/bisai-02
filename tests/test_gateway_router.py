@@ -1039,3 +1039,129 @@ def test_a_group_reassign_without_the_mention_is_silent():
 
     assert outcome.replies == ()
     assert outcome.save_change is None
+
+
+# ---------- U4 退出回流（§8.1 / §9.1 第 15 条）----------
+
+
+def _dm(text, open_id="ou_li"):
+    return _inbound(text, chat_type="p2p", chat_id="dm1", sender_open_id=open_id)
+
+
+def test_the_owner_can_send_a_card_back_to_the_pool():
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "ou_li", "volunteer_1"))
+
+    outcome = route(
+        _dm("我不做了 T1"),
+        {},
+        roster,
+        cards=cards,
+        assignments=assignments,
+        group_chat_id="c1",
+    )
+
+    assert outcome.replies[0].chat_id == "dm1"                 # 先回本人
+    assert outcome.replies[0].text == replies.RELEASE_OK.format(task_id="T1")
+    assert outcome.replies[1].chat_id == "c1"                  # 再播群公示
+    assert "李四 退出了 T1（模块1）" in outcome.replies[1].text
+    assert "待认领" in outcome.replies[1].text
+    assert outcome.save_change["change"] == {
+        "at": outcome.save_change["change"]["at"],
+        "by": "ou_li",
+        "kind": "release",
+        "task_id": "T1",
+        "from_user": "ou_li",
+        "to_user": "",
+        "reason": "",
+        "confirmed_by": ["ou_li"],
+    }
+    # 回流只清负责人：source 不动（§8.2 没定义回流后的 source，不臆想新枚举值）
+    assert outcome.save_change["update"] == {"task_id": "T1", "assignee": ""}
+
+
+def test_release_without_a_group_still_lets_the_person_quit():
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "ou_li", "auto"))
+
+    outcome = route(_dm("我不做了 T1"), {}, roster, cards=cards, assignments=assignments)
+
+    assert len(outcome.replies) == 1                            # 只回本人，没地方播报
+    assert outcome.save_change["update"]["assignee"] == ""
+
+
+def test_release_is_idempotent_and_never_says_it_failed():
+    """§9.1 第 15 条：不是你的 / 已经回流过 ⇒ 同一句话，不重复回流、不重复公示。"""
+    cards, roster = _m4_fixtures()
+
+    someone_elses = route(
+        _dm("我不做了 T1"),
+        {},
+        roster,
+        cards=cards,
+        assignments=_assignments(("T1", "ou_wang", "auto")),
+        group_chat_id="c1",
+    )
+    already_pooled = route(
+        _dm("我不做了 T1"),
+        {},
+        roster,
+        cards=cards,
+        assignments=_assignments(("T1", "", "auto")),
+        group_chat_id="c1",
+    )
+    unknown_card = route(
+        _dm("我不做了 T9"), {}, roster, cards=cards, assignments=(), group_chat_id="c1"
+    )
+
+    for outcome in (someone_elses, already_pooled, unknown_card):
+        assert len(outcome.replies) == 1
+        assert "不在你名下" in outcome.replies[0].text
+        assert outcome.save_change is None
+
+
+def test_release_needs_a_card_id():
+    cards, roster = _m4_fixtures()
+    outcome = route(
+        _dm("我不做了"),
+        {},
+        roster,
+        cards=cards,
+        assignments=_assignments(("T1", "ou_li", "auto")),
+        group_chat_id="c1",
+    )
+
+    assert outcome.replies[0].text == replies.RELEASE_FORM
+    assert outcome.save_change is None
+
+
+def test_release_in_the_group_asks_for_a_direct_message():
+    cards, roster = _m4_fixtures()
+    outcome = route(
+        _inbound("我不做了 T1", sender_open_id="ou_li"),
+        {},
+        roster,
+        cards=cards,
+        assignments=_assignments(("T1", "ou_li", "auto")),
+        group_chat_id="c1",
+    )
+
+    assert outcome.replies[0].text == replies.RELEASE_NEED_DM
+    assert outcome.save_change is None
+
+
+def test_the_release_announcement_teaches_a_direct_message_action():
+    """群公示教的是**私聊**动作 —— 不套「@我」（L5），但要把动作说全。"""
+    cards, roster = _m4_fixtures()
+    outcome = route(
+        _dm("我不做了 T1"),
+        {},
+        roster,
+        cards=cards,
+        assignments=_assignments(("T1", "ou_li", "auto")),
+        group_chat_id="c1",
+    )
+
+    announced = outcome.replies[1].text
+    assert "私聊我发「我想接 T1」" in announced
+    assert "@我" not in announced

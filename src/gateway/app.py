@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.config import ConfigError, load_config
-from src.gateway import allocation, reminder, replies, vote, workspace
+from src.gateway import allocation, change, reminder, replies, vote, workspace
 from src.gateway.client import FeishuClient
 from src.gateway.events import ImageOut, Inbound, Outcome, Reply, reply, to_inbound
 from src.gateway.router import route
@@ -258,9 +258,18 @@ class Gateway:
         return None
 
     def _deliver(self, outcome: Outcome, store: JsonStore) -> tuple[Reply, ...]:
-        """发出所有回复，返回**发失败的**那些（P0-C）。每条都打一行轨迹（P1-J）。"""
+        """发出所有回复，返回**发失败的**那些（P0-C）。每条都打一行轨迹（P1-J）。
+
+        U4 变更**先落盘、再播报**（§8.2 写序的配套）：没写成就别宣布 —— 认领竞态
+        （``expect_empty`` 在锁内不成立）时改发第 16 条那句，群里不会出现假公示。
+        """
         failed: list[Reply] = []
-        for message in outcome.replies:
+        pending: tuple[Reply, ...] = outcome.replies
+        if outcome.save_change is not None:
+            written, owner = self._save_change(store, outcome.save_change)
+            if not written and owner:
+                pending = self._conflict_replies(store, outcome.save_change, owner)
+        for message in pending:
             # 一条发失败不能吃掉后面几条：M4 开窗口要连发"清单发群 + 每人私聊"，
             # 某个人的私聊发不出去，群里的清单必须照发（方案 §7：不能静默失败）。
             if self._send(message) is not None:
@@ -382,6 +391,26 @@ class Gateway:
                 else record
                 for record in items
             ],
+        )
+
+    def _conflict_replies(
+        self, store: JsonStore, payload: dict, owner: str
+    ) -> tuple[Reply, ...]:
+        """认领竞态（§9.1 第 16 条）：卡在锁内被先到者接走 ⇒ 改发那句，不发假公示。
+
+        人名在这里现读花名册解析 —— router 是纯函数，手里没有"锁内那一刻"的花名册。
+        """
+        fallback = payload.get("fallback")
+        if not fallback:
+            return ()
+        return (
+            Reply(
+                chat_id=fallback["chat_id"],
+                text=fallback["template"].format(
+                    name=change.name_of(store.load_members(), owner),
+                    **(fallback.get("fields") or {}),
+                ),
+            ),
         )
 
     def _save_change(self, store: JsonStore, payload: dict) -> tuple[bool, str]:

@@ -106,6 +106,11 @@ __all__ = [
     "REASSIGN_DONE_POOL",
     "REASSIGN_NOOP",
     "reassign_unknown",
+    "RELEASE_NEED_DM",
+    "RELEASE_FORM",
+    "RELEASE_NOT_YOURS",
+    "RELEASE_OK",
+    "RELEASE_ANNOUNCED",
     "REGISTER_FORM",
     "REGISTER_FORM_BAD",
     "REGISTER_NEED_LEADER",
@@ -160,6 +165,7 @@ COMMANDS = (
     Command("报告", (GROUP,), "组长在群里回「报告」，我发执行报告和甘特图"),
     Command("我们要做的方向是：", (GROUP,), "群里发「我们要做的方向是：…」，直接定方向，不用投票"),
     Command("改派 T3 @某人", (GROUP,), "组长在群里发「改派 T3 @某人」，换人做这张卡"),
+    Command("我不做了 T3", (DM,), "私聊发「我不做了 T3」，把这张卡退回待认领"),
 )
 
 
@@ -334,6 +340,19 @@ def reassign_unknown(task_id: str, assignments=()) -> str:
     if not ids:
         return REASSIGN_NO_ASSIGNMENTS
     return REASSIGN_UNKNOWN.format(task_id=task_id, tasks="、".join(ids))
+
+
+# ---- U4 任务变更：退出回流（§8.1 / §9.1 第 15 条）----
+RELEASE_NEED_DM = "「我不做了 T3」私聊我发就行，群里说会吵到别人。"
+RELEASE_FORM = "要说退出哪张卡：私聊发「我不做了 T3」就行。"
+# 幂等（§9.1 第 15 条）：不是你的 / 已经回流过，都用这一句，不说"操作失败"
+RELEASE_NOT_YOURS = "{task_id} 现在不在你名下，我没动。"
+RELEASE_OK = "收到，{task_id} 不算你的了，卡回到待认领。"
+# 群公示：教的是私聊动作，所以不套「@我」（L5）；上行数仍受 ≤4 行约束
+RELEASE_ANNOUNCED = (
+    "{name} 退出了 {task_id}（{module}），这张卡回到待认领。"
+    "想接的私聊我发「我想接 {task_id}」。"
+)
 
 
 # ---- 登记（§7.7）----

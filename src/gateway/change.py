@@ -25,11 +25,18 @@ from src.gateway import replies
 from src.gateway.events import Inbound, Outcome, Reply, reply
 from src.models import AssignmentRecord, Roster, TaskCard
 
-__all__ = ["REASSIGN_PATTERN", "reassign"]
+__all__ = [
+    "REASSIGN_PATTERN",
+    "RELEASE_PATTERN",
+    "reassign",
+    "release",
+    "name_of",
+]
 
 # 前缀与「完成 T3」同款：容忍空格与大小写，但**整句必须就是这条指令**之后剩卡号
 # （@ 段已被 ``strip_mentions`` 剥掉）—— "改派 T3 谢谢" 落提示，不猜。
 REASSIGN_PATTERN = re.compile(r"^改派\s*[Tt](\d+)\s*$")
+RELEASE_PATTERN = re.compile(r"^我不做了\s*[Tt](\d+)\s*$")
 
 
 def reassign(
@@ -73,17 +80,17 @@ def reassign(
     if record.assignee == target:
         # §9.1 第 17 条：无变化改派 —— 不落盘、不公示（没有变化就不产生台账条目），
         # 但组长的动作要有回执 ⇒ 不静默
-        who = "你" if target == inbound.sender_open_id else _name_of(roster, target)
+        who = "你" if target == inbound.sender_open_id else name_of(roster, target)
         return Outcome(
             replies=(reply(inbound, replies.REASSIGN_NOOP.format(task_id=task_id, who=who)),)
         )
 
     stamp = (now or datetime.now()).isoformat(timespec="seconds")
     group = group_chat_id or inbound.chat_id
-    to_name = _name_of(roster, target)
+    to_name = name_of(roster, target)
     if record.assignee:
         announced = replies.REASSIGN_DONE.format(
-            task_id=task_id, frm=_name_of(roster, record.assignee), to=to_name
+            task_id=task_id, frm=name_of(roster, record.assignee), to=to_name
         )
     else:
         # 回流池里的卡（§8.3：`assignee == ""` 就是"待认领"）：没有前任，公示写成两段
@@ -109,6 +116,80 @@ def reassign(
     )
 
 
+def release(
+    text: str,
+    inbound: Inbound,
+    roster: Roster | None = None,
+    cards: Sequence[TaskCard] = (),
+    assignments: Sequence[AssignmentRecord] = (),
+    now: datetime | None = None,
+    group_chat_id: str = "",
+) -> Outcome:
+    """``我不做了 T3`` —— 私聊、本人是负责人（§7.1 第 11 条 / §8.1）。
+
+    本人私聊发出即确认退出：``assignee`` 清空 ⇒ 卡进"待认领"（§8.3：回流池不新增文件），
+    再写一条台账、往群里播一句公示。被改派的人就是用这一条退回池子（PM 裁的 A 方案）。
+
+    幂等（§9.1 第 15 条）：不是你的 / 已经回流过 ⇒ 回"现在不在你名下"，**不重复回流、
+    不重复公示**，也不说"操作失败"。
+    """
+    if inbound.chat_type != "p2p":
+        return Outcome(replies=(reply(inbound, replies.RELEASE_NEED_DM),))
+
+    match = RELEASE_PATTERN.match((text or "").strip())
+    if not match:
+        return Outcome(replies=(reply(inbound, replies.RELEASE_FORM),))
+
+    task_id = f"T{match.group(1)}"
+    record = next((r for r in (assignments or ()) if r.task_id == task_id), None)
+    if record is None or record.assignee != inbound.sender_open_id:
+        return Outcome(
+            replies=(reply(inbound, replies.RELEASE_NOT_YOURS.format(task_id=task_id)),)
+        )
+
+    sender = inbound.sender_open_id
+    stamp = (now or datetime.now()).isoformat(timespec="seconds")
+    out = [reply(inbound, replies.RELEASE_OK.format(task_id=task_id))]
+    # 群公示（§8.1 / §8.3）：发到**绑定的那个群**。拿不到群也不拦着人退出 ——
+    # 卡照回池子，只是这一句播报没地方发（U2 之前就是这个口径的反面教材）。
+    if group_chat_id:
+        out.append(
+            Reply(
+                chat_id=group_chat_id,
+                text=replies.RELEASE_ANNOUNCED.format(
+                    name=name_of(roster, sender),
+                    task_id=task_id,
+                    module=_module_name(task_id, cards),
+                ),
+            )
+        )
+    return Outcome(
+        replies=tuple(out),
+        save_change={
+            "change": {
+                "at": stamp,
+                "by": sender,
+                "kind": "release",
+                "task_id": task_id,
+                "from_user": sender,
+                "to_user": "",                      # 回流没有接手人（§8.2 表）
+                "reason": "",
+                "confirmed_by": [sender],
+            },
+            # `source` 一个字不动：回流改的是"谁做"，不改这张卡为什么存在（§8.2 没定义
+            # 回流后的 source 取值 ⇒ 不臆想一个新枚举值；真相在台账里）
+            "update": {"task_id": task_id, "assignee": ""},
+        },
+    )
+
+
+def _module_name(task_id: str, cards: Sequence[TaskCard]) -> str:
+    for card in cards or ():
+        if card.task_id == task_id:
+            return card.module_name or task_id
+    return task_id
+
+
 def _mentioned_user(inbound: Inbound) -> str:
     """@ 结构里的**人** —— open_id 只从 @ 结构取（D-34），机器人自己那个 @ 不算。"""
     for mention in inbound.mentions or ():
@@ -118,8 +199,11 @@ def _mentioned_user(inbound: Inbound) -> str:
     return ""
 
 
-def _name_of(roster: Roster | None, open_id: str) -> str:
-    """花名册里查名字；查不到就原样回 open_id（宁可不润色，也不编一个人名）。"""
+def name_of(roster: Roster | None, open_id: str) -> str:
+    """花名册里查名字；查不到就原样回 open_id（宁可不润色，也不编一个人名）。
+
+    公开的：app 层在"认领竞态"那条回话里也要用它（人名是事实槽位，U5）。
+    """
     for member in getattr(roster, "members", None) or ():
         if member.open_id == open_id:
             return member.name or open_id
