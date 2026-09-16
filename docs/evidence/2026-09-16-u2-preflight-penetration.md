@@ -72,7 +72,9 @@ Consider using the pymupdf_layout package for a greatly improved page layout ana
 1. 发作业书文件给我，再回「作业书」—— 我抽评分点、拆
 ```
 
-## 2. run2 原样日志（11:54:38 – 12:05:18，快照）
+## 2. run2 / run3 原样日志
+
+### 2.1 run2（11:54:38 – 12:05:18，快照）
 
 原始文件 `%TEMP%\u2_penetration_run2.log`（28 行；生成本文时从仍在跑的 `u2_penetration.log` 快照）。
 下面 = 第 10–28 行逐字原文。
@@ -99,6 +101,40 @@ Consider using the pymupdf_layout package for a greatly improved page layout ana
 [M0] 2026-09-16T12:04:40 recv id=om_x100b65951bb174acb1141c29a11c9b1 chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=text text=3
 ```
 
+### 2.2 run3（12:09:46 – 12:19:38）
+
+原始文件 `%TEMP%\u2_penetration_run3.log`（35 行）。这个窗口是 run2 那个 20 分钟窗口自动退出后重开的，`state` 与 run2 连着，所以下面能看到 `12:12` 那轮新的开窗与 `过半：1/1 票`。
+下面 = 第 10–35 行逐字原文。
+
+```
+[M0] 2026-09-16T12:12:47 recv id=om_x100b65953d3568a0b1fafc3cf148ef1 chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=text text=@_user_1 方向
+[M0] 2026-09-16T12:12:49 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 收到，按评分点想几个候选方向，大概半分钟。
+[M0] 2026-09-16T12:12:52 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 候选方向（仅供参考，由全组拍板）：
+1. 校园奶茶店营销计划方案
+   覆盖目标
+[M0] 2026-09-16T12:12:58 recv id=om_x100b65953a6a5ca0b1bd339f81ae2f1 chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=text text=2
+[M0] 2026-09-16T12:12:59 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 记下了，你投的是 2. 国产美妆品牌校园推广营销方案。想改再回一次数字。
+[M0] 2026-09-16T12:13:00 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 方向定了：2. 国产美妆品牌校园推广营销方案，过半：1/1 票。
+[M0] 2026-09-16T12:18:55 recv id=om_x100b6595c43584b4c2fa68f4f8f1fc9 chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=file text=
+[M0] 2026-09-16T12:19:18 recv id=om_x100b6595c29600a0c11984217ab3698 chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=image text=
+[M0] 2026-09-16T12:19:29 recv id=om_x100b6595c3de30b4c25f5d990a67d82 chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=text text=@_user_1 作业书
+[M0] 2026-09-16T12:19:30 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 收到，开始解析作业书，大概半分钟。
+Consider using the pymupdf_layout package for a greatly improved page layout analysis.
+[M0] 2026-09-16T12:19:38 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 《营销方案计划》 电子商务技能检测｜交付：现场操作，小组合作完成一份营销计划方案
+[M0] 2026-09-16T12:24:04 recv id=om_x100b6595d088e0a0b49efe5068bf1c8 chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=text text=@_user_1 方向
+[M0] 2026-09-16T12:24:05 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 收到，按评分点想几个候选方向，大概半分钟。
+[M0] 2026-09-16T12:24:09 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 候选方向（仅供参考，由全组拍板）：
+1. 校园咖啡店营销计划方案
+   覆盖目标
+[M0] 2026-09-16T12:25:11 recv id=om_x100b6595eca0e0acc0277c3b8632a98 chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_a79861323d0c6f45676d3f62b68284e3 type=text text=@_user_1 方向
+[M0] 2026-09-16T12:25:12 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 投票还在走，还剩 9 分钟。直接回数字就行。
+[M0] 2026-09-16T12:25:21 recv id=om_x100b6595eddac0a8c4aac7a0af9f23d chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_a79861323d0c6f45676d3f62b68284e3 type=text text=1
+[M0] 2026-09-16T12:25:22 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 记下了，你投的是 1. 校园咖啡店营销计划方案。想改再回一次数字。
+[M0] 2026-09-16T12:25:34 recv id=om_x100b6595ed13d4acb04db98ed920c86 chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=text text=1
+[M0] 2026-09-16T12:25:35 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 记下了，你投的是 1. 校园咖啡店营销计划方案。想改再回一次数字。
+[M0] 2026-09-16T12:25:35 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 方向定了：1. 校园咖啡店营销计划方案，过半：2/2 票。
+```
+
 ## 3. 逐条判定
 
 | # | 动作 | 期望 | 实际（日志 / 落盘） | 判定 |
@@ -113,9 +149,10 @@ Consider using the pymupdf_layout package for a greatly improved page layout ana
 | ② | **新窗**内裸数字 | 计票 | run2 `12:03:36 recv … text=1` → `12:03:37 -> … ok \| 记下了，你投的是 1. 为校园周边奶茶店制定营销计划方案。` | ✅ |
 | ③ | 投票**进行中** `@作业书` | 窗不被吞、照常出评分点 | run1 `11:52:22 recv … @_user_1 作业书` → `11:52:22` 收到解析 → `11:52:31` 出评分点；此后 `awaiting` 仍是 `vote`、候选与票数原样在（§5.3） | ✅ |
 | ④ | 组长 `@… 封盘1` 后，群里裸数字 | 静默（门禁立刻恢复，T05） | run2 `12:04:35` 封盘 → `12:04:36` 方向定；`12:04:40 recv … text=3`，**无** `->` 行；`state.json` 的 `awaiting` / `vote` 一起清（§5.4） | ✅ |
-| ④ | **非成员**账号群内裸数字 | 静默 | **未测**（需要第二个不在花名册里的账号） | ⏳ |
+| ④ | **非成员**账号群内裸数字 | 静默 | **未测** —— 用「临时摘花名册成员」造非成员，摘/还原本身已跑通并留痕（§8），但两次窗口都没等到那条裸数字（顺序纪律见 §6.1） | ⏳ |
 | ⑤ | 成员私聊 `我想提议：…` | （卡里写的是）`NEED_GROUP` | run2 `12:04:09 recv`（私聊）→ `12:04:10 -> chat_id:oc_2d805f19… ok \| 有组员提议：校园开发测试` + `12:04:11` 私聊回执"已经匿名发到群里了。" ⇒ **转发进群**，不是 `NEED_GROUP` | ❌ 现状不可复现（见 §4） |
 | ⑤ | 私聊 `我想提议校园咖啡测试`（**没带冒号**） | — | run2 `12:03:55` → `12:03:56` 走帮助兜底 ⇒ 前缀**必须带冒号** | ℹ️ 附带钉住 |
+| ① | **D-45 ① 子格**：投 PDF → 发图 → `@作业书` | 图不许挤掉刚到的 PDF | run3 `12:18:55 file` 静默 → `12:19:18 image` 静默 → `12:19:29 @作业书` → `12:19:38` 出评分点（评分点来自那份 PDF）；`uploads\` 只有 PDF、无图片（§7） | ✅ |
 
 ## 4. ⑤「未入群用户私聊 → NEED_GROUP」：现状不可复现（机制）
 
@@ -290,4 +327,79 @@ run2 `12:04:09` 实测印证：私聊提议被转发进群，私聊侧只回执"
    还原点固定 `D:\rehearsal-logs\members_restore_point.json`，还原是**字节级回到原哈希**
    （已在假人盘上验过 round-trip + 拒错保护）；只碰 `data-upgrade\members.json`，`data\` 一个字节不动。
 
+## 7. D-45 ① 子格：PDF → 图 → `@作业书`（run3，12:18–12:19）
 
+**要验的**：一张图**不许**把刚发来的作业书 PDF 挤掉（D-45 ①）。run1 那次图片发在 PDF **之前**，顺序不对，这一格实际没测到；本轮按正确顺序补上。
+
+**原样日志**（同一份 `u2_penetration_run3.log`，见 §2.2）：
+
+```
+[M0] 2026-09-16T12:18:55 recv id=om_x100b6595c43584b4c2fa68f4f8f1fc9 chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=file text=
+[M0] 2026-09-16T12:19:18 recv id=om_x100b6595c29600a0c11984217ab3698 chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=image text=
+[M0] 2026-09-16T12:19:29 recv id=om_x100b6595c3de30b4c25f5d990a67d82 chat=oc_2d805f19bf755763edd6c63b835f01df from=ou_b8f6fdba44c4bdaa6cb1775c55f5f06f type=text text=@_user_1 作业书
+[M0] 2026-09-16T12:19:30 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 收到，开始解析作业书，大概半分钟。
+[M0] 2026-09-16T12:19:38 -> chat_id:oc_2d805f19bf755763edd6c63b835f01df ok | 《营销方案计划》 电子商务技能检测｜交付：现场操作，小组合作完成一份营销计划方案
+```
+
+- `12:18:55 type=file` 后面**没有** `-> ` 行 ⇒ 群里投文件静默。
+- `12:19:18 type=image` 后面**没有** `-> ` 行 ⇒ 群里发图静默。
+- `12:19:38` 出的评分点来自**那份 PDF** ⇒ 图没把它挤掉。
+
+**落盘（`uploads\` 原样，12:19:38 之后读）**：只有 PDF、**没有任何图片**。
+
+```
+LastWriteTime       Length  Name
+2026/9/16 12:19:31  129583  营销方案计划》任务书.pdf
+sha256 = 83E749CFA3C6600201758C57ABD277836B1AEDFBE84CD0D6EC9C36680B77F27A
+```
+
+**`pending_file` 中间态没有留成原样**：`12:19:30` 那句 `@作业书` 已经把它消费掉，事后的 `state.json` 里没有这个键。
+**不为此重跑一轮**，改用代码旁证：
+
+- `router.remember_file()` 存进 `state.pending_file` 的是 `{file_key, file_name, resource_type, chat_id, message_id, received_at}`，**不含路径**；
+  下载归 app 层、发生在解析时 —— 这也解释了 `uploads` 那份的 `LastWriteTime` 是 `12:19:31` 而不是收信时刻。
+- `router.route()` 的 image 分支在群里直接 `return Outcome()`，**不带 `state`** ⇒ 图片这条路根本不写 `pending_file`，挤不掉。
+
+**判定：D-45 ① 子格 —— 已过（2026-09-16 12:18–12:19）。**
+
+## 8. 花名册摘 / 还原的哈希留痕（④ 非成员半格的前置动作）
+
+没有第三方账号 ⇒ 用「临时摘花名册成员」造一个非成员。两次摘人都**只碰 `data-upgrade\members.json`**，`data\` 一个字节没动。
+
+| 轮次 | 时点 | 动作 | sha256 | 人数 |
+|---|---|---|---|---|
+| ① | 12:09:34 | 摘前（基线） | `D9A0E915EBC023D83322AB23FF4948D640727D0A66DB11C9EC5095E048D41A40` | 3 |
+| ① | 12:09:34 | 摘后 | `BC3262D61B675B1D32209128B512A23ADF68DFCA9601F345D421360A7A746625` | 2 |
+| ① | 12:16:24 | 还原后 | `D9A0E915…`（与基线一致） | 3 |
+| ② | 12:26:45 | 摘前（基线） | `D9A0E915…` | 3 |
+| ② | 12:26:45 | 摘后 | `D88C7ECE94B141344911BF30E7969AC69102D649F1FF486165210E1B2A3A3157` | 2 |
+| ② | 12:32:01 | 还原后 | `D9A0E915…`（与基线一致） | 3 |
+
+第 ① 轮是手写脚本改的；第 ② 轮起用 `D:\rehearsal-logs\roster_toggle.ps1`（`-Drop` / `-Restore`）⇒ 两轮"摘后"哈希不同（同一份逻辑内容、不同序列化），
+**但两轮都精确还原回同一个基线哈希**。
+
+**还原前后 diff（第 ② 轮）**：
+
+```
+--- members.dropped.json
++++ members.restored.json
+@@ -9,4 +9,8 @@
+       "open_id": "ou_c5aa3b1889a851d3276493f88862742c",
+       "name": "戚相宜"
++    },
++    {
++      "open_id": "ou_a79861323d0c6f45676d3f62b68284e3",
++      "name": "雨鑫 左"
+     }
+   ],
+```
+
+（diff 就是"那一行回来"，其余字节不变。）
+
+`roster_toggle.ps1` 的 round-trip 与拒错保护另外在**假人盘**上验过（不拿真盘试）：`-Drop` 3→2、`-Restore` 字节级回原哈希；
+`-Drop` 一个不在名册里的 open_id 会抛错、拒绝执行。
+
+## 9. 归属注记
+
+`4ed71cb`（"§8.10 ④ 非成员半格顺序…"）**是审核员的提交**，不是架构师的；笔是他的（`git add -u` 顺手带走了本批开发的两处修订），内容是本批开发的。
+按"不重写已推历史"处置，只在此留一行注记（开发此前在汇报里把这笔写成"架构师"，是笔误）。
