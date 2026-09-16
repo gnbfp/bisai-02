@@ -29,13 +29,17 @@ __all__ = [
     "AssignmentRecord",
     "Member",
     "Roster",
+    "ChangeRecord",
     "RUBRIC_STATUS",
     "ASSIGNMENT_SOURCE",
+    "CHANGE_KIND",
     "parse_deadline",
 ]
 
 RUBRIC_STATUS = ("normal", "ambiguous")
 ASSIGNMENT_SOURCE = ("volunteer_1", "volunteer_2", "auto", "leader")
+# U4 变更类型（§8.2）：换人 / 退出回流 / 补位认领
+CHANGE_KIND = ("reassign", "release", "claim")
 
 EFFORT_HOURS_FLOOR = 0.5          # 工时地板，避免除零（§7.3）
 BALANCE_LIMIT = 3.0               # 循环内均衡判据 max/min <= 3（§7.4）
@@ -209,6 +213,40 @@ class AssignmentRecord(_Base):
                 f"AssignmentRecord({self.task_id}): source 必须是 {ASSIGNMENT_SOURCE}，"
                 f"得到 {self.source!r}"
             )
+
+
+@dataclass
+class ChangeRecord(_Base):
+    """任务变更台账 —— U4 的换人 / 退出回流 / 认领，落 ``changes.json``（§8.2）。
+
+    与 ``proposals.json`` / ``direction.json`` 的区别：那两个"文档没定义字段所以走裸
+    JSON"，这个字段级定义 §8.2 已定型 ⇒ 定型 + 校验，同 ``AssignmentRecord``。
+
+    **写序（§8.2 v1.6）**：一次变更先写这份台账（意图日志，只追加）、再写
+    ``assignments.json``（状态）。两个文件之间**不是事务** —— 崩在中间时重放台账收敛，
+    所以台账是"意图"的真源，顺序一处都不许倒（``JsonStore.mutate_change()`` 是唯一入口）。
+    """
+
+    at: str
+    by: str
+    kind: str
+    task_id: str
+    from_user: str = ""                 # 前任；待认领的卡（回流池）为空
+    to_user: str = ""                   # 接手；``release`` 没有接手人
+    reason: str = ""                    # 选填（PM 已定：不填也记录操作人与时间）
+    confirmed_by: list[str] = field(default_factory=list)
+
+    def validate(self) -> None:
+        if self.kind not in CHANGE_KIND:
+            raise SchemaError(f"ChangeRecord: kind 必须是 {CHANGE_KIND}，得到 {self.kind!r}")
+        for name in ("at", "by", "task_id"):
+            if not getattr(self, name):
+                raise SchemaError(f"ChangeRecord.{name} 不能为空")
+        if self.kind == "release":
+            if self.to_user:
+                raise SchemaError("ChangeRecord: release（回流）不该有 to_user")
+        elif not self.to_user:
+            raise SchemaError(f"ChangeRecord: {self.kind} 必须写明 to_user")
 
 
 @dataclass

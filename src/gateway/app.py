@@ -39,11 +39,12 @@ from src.intelligence.extract import (
 )
 from src.intelligence.llm import LLMClient, LLMError
 from src.intelligence.parse import parse_assignment
-from src.models import AssignmentRecord, Preference, Roster
+from src.models import AssignmentRecord, ChangeRecord, Preference, Roster
 from src.report.checklist import render_checklist
 from src.report.gantt import render_gantt
 from src.storage import (
     ASSIGNMENTS,
+    CHANGES,
     GANTT,
     PREFERENCES,
     PROPOSALS,
@@ -278,6 +279,8 @@ class Gateway:
             self._save_direction(store, outcome.save_direction)
         if outcome.save_complete is not None:
             self._save_complete(store, outcome.save_complete)
+        if outcome.save_change is not None:
+            self._save_change(store, outcome.save_change)
         for image in outcome.images:                 # M7 甘特图：文本先发、图后发
             if self._send_image(image) is not None:  # 图发失败要在群里说（必修 D）
                 self._send(Reply(chat_id=image.chat_id, text=replies.IMAGE_SEND_FAILED))
@@ -379,6 +382,21 @@ class Gateway:
                 else record
                 for record in items
             ],
+        )
+
+    def _save_change(self, store: JsonStore, payload: dict) -> tuple[bool, str]:
+        """U4 变更落盘（§8.2）：一次变更 = 台账 + 状态，**锁内两写、先台账后状态**。
+
+        返回 ``(写了没, 这张卡现在的负责人)`` —— 认领竞态（``expect_empty``）的后到者
+        拿到 ``(False, 先到者)``，由调用方照 §9.1 第 16 条回话（人名是事实槽位，原样注入）。
+        """
+        update = payload.get("update") or {}
+        return store.mutate_change(
+            ChangeRecord.from_dict(payload["change"]),
+            update.get("task_id", ""),
+            update.get("assignee", ""),
+            update.get("source"),
+            expect_empty=bool(update.get("expect_empty")),
         )
 
     def _send_image(self, image: ImageOut):

@@ -28,12 +28,14 @@ import json
 import os
 import re
 import threading
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable
 
 from src.models import (
     AssignmentMeta,
     AssignmentRecord,
+    ChangeRecord,
     Preference,
     Roster,
     RubricPoint,
@@ -47,6 +49,7 @@ __all__ = [
     "CARDS",
     "PREFERENCES",
     "ASSIGNMENTS",
+    "CHANGES",
     "PROPOSALS",
     "DIRECTION",
     "MEMBERS",
@@ -68,6 +71,8 @@ RUBRIC = "rubric.json"
 CARDS = "cards.json"
 PREFERENCES = "preferences.json"
 ASSIGNMENTS = "assignments.json"
+# U4 变更台账（§8.2）：只追加的意图日志，写序在 assignments.json **之前**。
+CHANGES = "changes.json"
 PROPOSALS = "proposals.json"
 # M2 方向落定结果（§2.6）。字段级定义 requirements.md 没有，所以走裸 JSON，同 proposals.json。
 DIRECTION = "direction.json"
@@ -202,6 +207,54 @@ class JsonStore:
             self._write_if_changed_unlocked(name, [item.to_dict() for item in new_items], old_text)
             return new_items
 
+    def mutate_change(
+        self,
+        change: ChangeRecord,
+        task_id: str,
+        assignee: str,
+        source: str | None = None,
+        *,
+        expect_empty: bool = False,
+    ) -> tuple[bool, str]:
+        """U4 变更的**锁内两写**：先 ``changes.json``（意图日志）、再 ``assignments.json``（状态）。
+
+        §8.2 v1.6 的写序与 §8.2 的认领竞态都收在这一处：
+
+          * **写序** —— 崩在两次写中间时，重放台账即可收敛（台账是"意图"的真源）；
+          * **竞态** —— ``expect_empty=True``（认领）时，"这张卡还没人负责"这个判据与写入
+            在**同一把锁内**求值：先到者写入非空 ``assignee``，后到者拿到
+            ``(False, 先到者的 open_id)``，两个文件**一个字节都不动**。
+
+        锁是进程级的（``_GLOBAL_LOCK``，所有 ``JsonStore`` 共享）⇒ 别的回调线程读不到
+        "台账有、状态没有"的中间态。返回 ``(写了没, 这张卡现在的负责人)``。
+
+        ``assignee`` 与盘上一致 = 无变化 ⇒ 不写（§9.1 第 17 条：没有变化就不产生台账条目）。
+        """
+        with self._lock:
+            change.validate()
+            raw_changes = self._read_unlocked(CHANGES, []) or []
+            records = [
+                AssignmentRecord.from_dict(item)
+                for item in (self._read_unlocked(ASSIGNMENTS, []) or [])
+            ]
+            index = next((i for i, r in enumerate(records) if r.task_id == task_id), None)
+            if index is None:
+                # 卡不在盘上：存在性判定在上游（§9.1 第 13 条），这里只兜底，不凭空造卡
+                return False, ""
+            current = records[index]
+            if expect_empty and current.assignee:
+                return False, current.assignee
+            if assignee == current.assignee:
+                return False, current.assignee
+            # 先台账、再状态 —— 顺序不许倒（§8.2 v1.6）
+            self._write_unlocked(CHANGES, [*raw_changes, change.to_dict()])
+            records[index] = replace(
+                current, assignee=assignee, source=source or current.source
+            )
+            records[index].validate()
+            self._write_unlocked(ASSIGNMENTS, [r.to_dict() for r in records])
+            return True, assignee
+
     def ensure_dirs(self) -> None:
         """建好 data/ 与 data/uploads/。进程启动时调一次。"""
         with self._lock:
@@ -276,6 +329,14 @@ class JsonStore:
 
     def save_assignments(self, assignments: list[AssignmentRecord]) -> None:
         self._save_many(ASSIGNMENTS, assignments)
+
+    # ---------- 变更台账（U4 变更写，群公示 / 复核读）----------
+
+    def load_changes(self) -> list[ChangeRecord]:
+        return self._load_many(CHANGES, ChangeRecord)
+
+    def save_changes(self, changes: list[ChangeRecord]) -> None:
+        self._save_many(CHANGES, changes)
 
     # ---------- 花名册（M0 登记写，M2 / M4 / M5 / M6 / M7 读）----------
 

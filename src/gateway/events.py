@@ -115,6 +115,9 @@ class Outcome:
       * ``save_proposal``：一条匿名提议（M5，追加写，含真实 ``user_id`` 留痕）；
       * ``save_direction``：整份方向结果（M2 落定，一次性覆盖，裸 JSON）；
       * ``save_complete``：M6 的完成标记（``{task_id, completed_at}``，只改那一条）；
+      * ``save_change``：U4 变更（``{change: {...ChangeRecord}, update: {...}}``）——
+        **台账 + 状态一起写**，走 ``JsonStore.mutate_change()``（先台账、后状态，
+        两写在同一把锁内，§8.2 v1.6 / 认领竞态）；
       * ``images``：要发的图片（M7 甘特图），形状照 ``replies`` —— 只是这里走
         "先传图再发消息"那条路。
     """
@@ -131,6 +134,9 @@ class Outcome:
     # M6「完成 T3」（§2.1）：``{"task_id": "T3", "completed_at": "…"}``。
     # app 层按它走 ``mutate_many(ASSIGNMENTS, …)`` **只改那一条**（形状照 save_roster）。
     save_complete: dict | None = None
+    # U4 变更（§8.2）：``{"change": {...ChangeRecord}, "update": {task_id, assignee, source}}``。
+    # ``update.expect_empty`` = 认领的乐观并发判据（卡必须还没人负责），在锁内求值。
+    save_change: dict | None = None
     # M7 执行报告（§3.3）：要发的图片（甘特图 PNG）。
     images: tuple[ImageOut, ...] = ()
 

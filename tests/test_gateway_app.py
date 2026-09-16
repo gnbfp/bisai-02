@@ -1280,3 +1280,30 @@ def test_m3_failure_keeps_the_previous_snapshot(env):
     assert [p.id for p in store.load_rubric()] == ["R_old"]
     assert [c.task_id for c in store.load_cards()] == ["T_seed"]
     assert store.load_assignment().title == "旧作业"
+
+
+def test_a_change_lands_in_the_ledger_and_in_the_state(env):
+    """U4 落盘（§8.2）：一次变更 = 台账 + 状态，app 层两处一起写。"""
+    gateway, store, _, _ = env
+    store.save_assignments([AssignmentRecord(task_id="T1", assignee="ou_li", source="auto")])
+
+    ok, owner = gateway._save_change(
+        store,
+        {
+            "change": {
+                "at": "2026-09-17T21:00:00",
+                "by": "ou_zhang",
+                "kind": "reassign",
+                "task_id": "T1",
+                "from_user": "ou_li",
+                "to_user": "ou_wang",
+                "confirmed_by": ["ou_zhang"],
+            },
+            "update": {"task_id": "T1", "assignee": "ou_wang", "source": "leader"},
+        },
+    )
+
+    assert (ok, owner) == (True, "ou_wang")
+    record = store.load_assignments()[0]
+    assert (record.assignee, record.source) == ("ou_wang", "leader")
+    assert [c.kind for c in store.load_changes()] == ["reassign"]
