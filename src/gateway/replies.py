@@ -95,6 +95,17 @@ __all__ = [
     "PROPOSAL_ACK",
     "PROPOSAL_EMPTY",
     "PROPOSAL_NOT_MEMBER",
+    "REASSIGN_NEED_GROUP",
+    "REASSIGN_NEED_ROSTER",
+    "REASSIGN_NEED_LEADER",
+    "REASSIGN_FORM",
+    "REASSIGN_UNKNOWN",
+    "REASSIGN_NO_ASSIGNMENTS",
+    "REASSIGN_NOT_MEMBER",
+    "REASSIGN_DONE",
+    "REASSIGN_DONE_POOL",
+    "REASSIGN_NOOP",
+    "reassign_unknown",
     "REGISTER_FORM",
     "REGISTER_FORM_BAD",
     "REGISTER_NEED_LEADER",
@@ -148,6 +159,7 @@ COMMANDS = (
     Command("登记", (GROUP,), "群里回「登记」，照我回的表单 @ 人建花名册"),
     Command("报告", (GROUP,), "组长在群里回「报告」，我发执行报告和甘特图"),
     Command("我们要做的方向是：", (GROUP,), "群里发「我们要做的方向是：…」，直接定方向，不用投票"),
+    Command("改派 T3 @某人", (GROUP,), "组长在群里发「改派 T3 @某人」，换人做这张卡"),
 )
 
 
@@ -301,6 +313,28 @@ PROPOSAL_POSTED = "有组员提议：{text}"
 PROPOSAL_ACK = "已经匿名发到群里了。"
 PROPOSAL_EMPTY = "「我想提议：」后面得写上内容，比如「我想提议：前端用 React」。"
 PROPOSAL_NOT_MEMBER = "这份花名册里没有你。先在群里回「登记」把自己 @ 进去，再来找我提议。"
+
+# ---- U4 任务变更：换人（改派）（§8.1 / §9.1 第 13–17 条）----
+# 群里那几句教动作的都自带「@我」：门禁只放行 @ 了机器人的群文本（§9.1 第 4 条）。
+REASSIGN_NEED_GROUP = "改派是群里的事，把「改派 T3 @某人」发到群里。"
+REASSIGN_NEED_ROSTER = "还没有花名册。先在群里 @我 回「登记」，建好名单再改派。"
+REASSIGN_NEED_LEADER = "只有组长能改派。"
+REASSIGN_FORM = "改派要写清卡号和人，比如：@我 改派 T3 @某人。"
+REASSIGN_UNKNOWN = "没有 {task_id} 这张卡。现在能改派的是 {tasks}。"
+REASSIGN_NO_ASSIGNMENTS = "现在还没有分配，没得改派。先在群里 @我 回「你想做哪一块」，分完再来。"
+REASSIGN_NOT_MEMBER = "这位不在花名册里。先在群里 @我 回「登记」把 TA @ 进去，再改派。"
+REASSIGN_DONE = "改派好了：{task_id} 从{frm}交给 {to}，台账我记了。"
+REASSIGN_DONE_POOL = "改派好了：{task_id} 从待认领交给 {to}，台账我记了。"
+REASSIGN_NOOP = "{task_id} 现在就在{who}名下，没改。"
+
+
+def reassign_unknown(task_id: str, assignments=()) -> str:
+    """"这个编号我没找到" + 列当前卡号（§9.1 第 13 条，照 `PREFERENCE_BAD` 的形态）。"""
+    ids = [record.task_id for record in (assignments or ())]
+    if not ids:
+        return REASSIGN_NO_ASSIGNMENTS
+    return REASSIGN_UNKNOWN.format(task_id=task_id, tasks="、".join(ids))
+
 
 # ---- 登记（§7.7）----
 # 这一段是**表单模板**：用户要照着它把「登记 / 组长 / 组员」三行发回来，

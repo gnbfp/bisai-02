@@ -1,0 +1,126 @@
+"""U4 任务变更（换人 / 退出回流 / 补位认领）—— 纯函数、零 I/O、零 LLM（§8）。
+
+依据：`docs/ARCHITECTURE-UPGRADE.md` §8.1（类型与权限）/ §8.2（台账与写序）/
+§8.4（与兜底分配的关系）、§9.1 第 13–17 条（失败路径话术）、§7.1 第 10–12 条。
+
+三条纪律（与 M6 的 ``complete.py`` 同源）：
+  * **判定与落盘同源** —— 能不能改、改成什么，都在这一个函数里判死；落盘只发一个
+    ``Outcome.save_change`` 纯数据（app 层走 ``JsonStore.mutate_change()``）。
+  * **不产生台账的空动作** —— 无变化改派（§9.1 第 17 条）一个字节都不写，但**不静默**
+    （组长的动作要有回执）。
+  * **人名是事实槽位**（U5）—— 公示里的人名从花名册原样取，不润色、不省略。
+
+PM 2026-09-15 裁 **A 方案**（§8.1）：改派 = 组长直改即生效，被指派人可用
+``我不做了 T3`` 退回池子，**不加前置确认窗口** —— 少一个 ``awaiting`` 就少一处
+"窗口吃掉指令"的死锁面（``register.py`` 外审必修 1 就是这类病）。
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import datetime
+from typing import Sequence
+
+from src.gateway import replies
+from src.gateway.events import Inbound, Outcome, Reply, reply
+from src.models import AssignmentRecord, Roster, TaskCard
+
+__all__ = ["REASSIGN_PATTERN", "reassign"]
+
+# 前缀与「完成 T3」同款：容忍空格与大小写，但**整句必须就是这条指令**之后剩卡号
+# （@ 段已被 ``strip_mentions`` 剥掉）—— "改派 T3 谢谢" 落提示，不猜。
+REASSIGN_PATTERN = re.compile(r"^改派\s*[Tt](\d+)\s*$")
+
+
+def reassign(
+    text: str,
+    inbound: Inbound,
+    roster: Roster | None = None,
+    cards: Sequence[TaskCard] = (),
+    assignments: Sequence[AssignmentRecord] = (),
+    now: datetime | None = None,
+    group_chat_id: str = "",
+) -> Outcome:
+    """``@机器人 改派 T3 @某人`` —— 群 + 组长（§7.1 第 10 条 / §8.1）。
+
+    顺序 = 作用域 / 花名册 / 权限 / 解析 / 卡存在 / 目标在册 / 无变化 / 落盘。
+    每一格失败都**只回话、不落盘**，且都不静默（§9.1 第 13–14 条的反面：静默是
+    D-61 ② 的"非成员在群里办事"场景，改派不在其中）。
+    """
+    if inbound.chat_type != "group":
+        return Outcome(replies=(reply(inbound, replies.REASSIGN_NEED_GROUP),))
+    if roster is None or not getattr(roster, "members", None):
+        return Outcome(replies=(reply(inbound, replies.REASSIGN_NEED_ROSTER),))
+    if not inbound.sender_open_id or inbound.sender_open_id != roster.leader:
+        # 权限沿用既有 `roster.leader`，不新造角色（L1 / D-72）
+        return Outcome(replies=(reply(inbound, replies.REASSIGN_NEED_LEADER),))
+
+    match = REASSIGN_PATTERN.match((text or "").strip())
+    target = _mentioned_user(inbound)
+    if not match or not target:
+        return Outcome(replies=(reply(inbound, replies.REASSIGN_FORM),))
+
+    task_id = f"T{match.group(1)}"
+    record = next((r for r in (assignments or ()) if r.task_id == task_id), None)
+    if record is None:
+        # §9.1 第 13 条：列当前卡号，不解释内部原因，**不落盘**
+        return Outcome(replies=(reply(inbound, replies.reassign_unknown(task_id, assignments)),))
+
+    if target not in {member.open_id for member in roster.members}:
+        # §9.1 第 14 条：沿用非成员口径 + 指路「登记」，**不静默**
+        return Outcome(replies=(reply(inbound, replies.REASSIGN_NOT_MEMBER),))
+
+    if record.assignee == target:
+        # §9.1 第 17 条：无变化改派 —— 不落盘、不公示（没有变化就不产生台账条目），
+        # 但组长的动作要有回执 ⇒ 不静默
+        who = "你" if target == inbound.sender_open_id else _name_of(roster, target)
+        return Outcome(
+            replies=(reply(inbound, replies.REASSIGN_NOOP.format(task_id=task_id, who=who)),)
+        )
+
+    stamp = (now or datetime.now()).isoformat(timespec="seconds")
+    group = group_chat_id or inbound.chat_id
+    to_name = _name_of(roster, target)
+    if record.assignee:
+        announced = replies.REASSIGN_DONE.format(
+            task_id=task_id, frm=_name_of(roster, record.assignee), to=to_name
+        )
+    else:
+        # 回流池里的卡（§8.3：`assignee == ""` 就是"待认领"）：没有前任，公示写成两段
+        announced = replies.REASSIGN_DONE_POOL.format(task_id=task_id, to=to_name)
+
+    return Outcome(
+        # 群里那句同时是**回执**与**群公示**（§8.1）—— 白名单播报，不受 @ 门禁约束
+        replies=(Reply(chat_id=group, text=announced),),
+        save_change={
+            "change": {
+                "at": stamp,
+                "by": inbound.sender_open_id,
+                "kind": "reassign",
+                "task_id": task_id,
+                "from_user": record.assignee,
+                "to_user": target,
+                "reason": "",
+                "confirmed_by": [inbound.sender_open_id],
+            },
+            # 改派的来源翻成 `leader`（requirements.md §6.4 / D-20 的第四个取值）
+            "update": {"task_id": task_id, "assignee": target, "source": "leader"},
+        },
+    )
+
+
+def _mentioned_user(inbound: Inbound) -> str:
+    """@ 结构里的**人** —— open_id 只从 @ 结构取（D-34），机器人自己那个 @ 不算。"""
+    for mention in inbound.mentions or ():
+        if mention.is_bot or not mention.open_id:
+            continue
+        return mention.open_id
+    return ""
+
+
+def _name_of(roster: Roster | None, open_id: str) -> str:
+    """花名册里查名字；查不到就原样回 open_id（宁可不润色，也不编一个人名）。"""
+    for member in getattr(roster, "members", None) or ():
+        if member.open_id == open_id:
+            return member.name or open_id
+    return open_id

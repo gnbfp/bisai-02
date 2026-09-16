@@ -819,3 +819,223 @@ def test_fallback_list_only_answers_a_mentioned_group_message():
     """§4.5 末条：兜底清单只在被 @ 时回；没 @ 的群消息一个字都不回。"""
     assert _texts(route(_inbound("今天天气不错"), {}, None)) == [replies.COMMAND_LIST_TEXT]
     assert route(_nobody("今天天气不错"), {}, None) == Outcome()
+
+
+# ---------- U4 换人（改派）（§8.1 / §9.1 第 13–17 条）----------
+
+
+def _at(*people):
+    """群里一条「@机器人 + @某人…」：(m@ 之后那段正文, mentions)。
+
+    @ 段在正文里是占位符（``@_user_2``），open_id 只从 mentions 取 —— 与真机同构（D-34）。
+    """
+    mentions = [Mention(key="@_user_1", open_id="ou_bot", name="机器人007", is_bot=True)]
+    keys = []
+    for index, (open_id, name) in enumerate(people, start=2):
+        key = f"@_user_{index}"
+        mentions.append(Mention(key=key, open_id=open_id, name=name))
+        keys.append(key)
+    return " ".join(keys), tuple(mentions)
+
+
+def _assignments(*pairs):
+    return [
+        AssignmentRecord(task_id=task_id, assignee=open_id, source=source)
+        for task_id, open_id, source in pairs
+    ]
+
+
+def _leader_reassign(roster, cards, assignments, people, text="改派 T1 "):
+    body, mentions = _at(*people)
+    return route(
+        _inbound(text + body, sender_open_id=roster.leader, mentions=mentions),
+        {},
+        roster,
+        cards=cards,
+        assignments=assignments,
+    )
+
+
+def test_the_leader_can_reassign_a_card():
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "ou_li", "volunteer_1"), ("T2", "ou_wang", "auto"))
+
+    outcome = _leader_reassign(roster, cards, assignments, [("ou_wang", "王五")])
+
+    assert outcome.replies[0].chat_id == "c1"          # 群里那句同时是回执与群公示
+    assert "改派好了" in outcome.replies[0].text
+    assert "李四" in outcome.replies[0].text and "王五" in outcome.replies[0].text
+    assert outcome.save_change["change"] == {
+        "at": outcome.save_change["change"]["at"],
+        "by": "ou_zhang",
+        "kind": "reassign",
+        "task_id": "T1",
+        "from_user": "ou_li",
+        "to_user": "ou_wang",
+        "reason": "",
+        "confirmed_by": ["ou_zhang"],
+    }
+    assert outcome.save_change["change"]["at"]                  # 时间戳非空
+    # 改派的来源翻成 leader（requirements.md §6.4 / D-20 的第四个取值）
+    assert outcome.save_change["update"] == {
+        "task_id": "T1",
+        "assignee": "ou_wang",
+        "source": "leader",
+    }
+
+
+def test_reassigning_a_pool_card_says_it_was_waiting():
+    """回流池里的卡（§8.3：`assignee == ""`）没有前任，公示写成「从待认领交给 X」。"""
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "", "auto"))
+
+    outcome = _leader_reassign(roster, cards, assignments, [("ou_wang", "王五")])
+
+    assert "待认领" in outcome.replies[0].text
+    assert outcome.save_change["change"]["from_user"] == ""
+
+
+def test_a_reassign_that_changes_nothing_writes_nothing():
+    """§9.1 第 17 条：无变化改派 —— 不落盘、不公示，但**不静默**。"""
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "ou_wang", "auto"))
+
+    outcome = _leader_reassign(roster, cards, assignments, [("ou_wang", "王五")])
+
+    assert outcome.save_change is None
+    assert "没改" in outcome.replies[0].text and "王五" in outcome.replies[0].text
+
+
+def test_reassigning_the_card_to_the_leader_himself_says_you():
+    """§9.1 第 17 条的另一个形态：「T3 现在就在你名下，没改」。"""
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", roster.leader, "auto"))
+
+    outcome = _leader_reassign(roster, cards, assignments, [(roster.leader, "张三")])
+
+    assert outcome.save_change is None
+    assert "就在你名下" in outcome.replies[0].text
+
+
+def test_reassign_unknown_card_lists_the_current_ids():
+    """§9.1 第 13 条：列当前卡号、不解释内部原因、不落盘。"""
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "ou_li", "auto"), ("T2", "ou_wang", "auto"))
+
+    outcome = _leader_reassign(
+        roster, cards, assignments, [("ou_wang", "王五")], text="改派 T9 "
+    )
+
+    assert outcome.save_change is None
+    assert "没有 T9 这张卡" in outcome.replies[0].text
+    assert "T1、T2" in outcome.replies[0].text
+
+
+def test_reassign_with_no_assignments_at_all_says_so():
+    cards, roster = _m4_fixtures()
+
+    outcome = _leader_reassign(roster, cards, [], [("ou_wang", "王五")])
+
+    assert outcome.save_change is None
+    assert "还没" in outcome.replies[0].text
+
+
+def test_reassign_to_a_stranger_is_not_silent():
+    """§9.1 第 14 条：目标不在花名册 ⇒ 非成员口径 + 指路登记，**不静默**、不落盘。"""
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "ou_li", "auto"))
+
+    outcome = _leader_reassign(roster, cards, assignments, [("ou_stranger", "路人")])
+
+    assert outcome.save_change is None
+    assert "不在花名册" in outcome.replies[0].text
+    assert "登记" in outcome.replies[0].text
+
+
+def test_only_the_leader_can_reassign():
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "ou_li", "auto"))
+    body, mentions = _at(("ou_wang", "王五"))
+
+    outcome = route(
+        _inbound("改派 T1 " + body, sender_open_id="ou_li", mentions=mentions),
+        {},
+        roster,
+        cards=cards,
+        assignments=assignments,
+    )
+
+    assert outcome.save_change is None
+    assert outcome.replies[0].text == replies.REASSIGN_NEED_LEADER
+
+
+def test_reassign_needs_a_card_id_and_a_target():
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "ou_li", "auto"))
+
+    no_target = route(
+        _inbound("改派 T1", sender_open_id=roster.leader), {}, roster, cards=cards,
+        assignments=assignments,
+    )
+    no_id = _leader_reassign(roster, cards, assignments, [("ou_wang", "王五")], text="改派 王五 ")
+
+    assert no_target.save_change is None
+    assert no_target.replies[0].text == replies.REASSIGN_FORM
+    assert no_id.save_change is None
+    assert no_id.replies[0].text == replies.REASSIGN_FORM
+
+
+def test_reassign_without_a_roster_asks_for_the_form():
+    body, mentions = _at(("ou_wang", "王五"))
+    assignments = _assignments(("T1", "ou_li", "auto"))
+
+    outcome = route(
+        _inbound("改派 T1 " + body, sender_open_id="ou_zhang", mentions=mentions),
+        {},
+        None,
+        assignments=assignments,
+    )
+
+    assert outcome.save_change is None
+    assert outcome.replies[0].text == replies.REASSIGN_NEED_ROSTER
+
+
+def test_reassign_in_a_direct_message_points_to_the_group():
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "ou_li", "auto"))
+    body, mentions = _at(("ou_wang", "王五"))
+
+    outcome = route(
+        _inbound(
+            "改派 T1 " + body,
+            chat_type="p2p",
+            chat_id="dm1",
+            sender_open_id=roster.leader,
+            mentions=mentions,
+        ),
+        {},
+        roster,
+        cards=cards,
+        assignments=assignments,
+    )
+
+    assert outcome.save_change is None
+    assert outcome.replies[0].text == replies.REASSIGN_NEED_GROUP
+
+
+def test_a_group_reassign_without_the_mention_is_silent():
+    """U1 门禁：群里不 @ 机器人的「改派」一个字都不回（§4.5），更不会落盘。"""
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "ou_li", "auto"))
+    body, mentions = _at(("ou_wang", "王五"))
+
+    outcome = route(
+        _nobody("改派 T1 " + body, sender_open_id=roster.leader, mentions=mentions),
+        {},
+        roster,
+        cards=cards,
+        assignments=assignments,
+    )
+
+    assert outcome.replies == ()
+    assert outcome.save_change is None

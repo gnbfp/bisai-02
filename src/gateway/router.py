@@ -5,7 +5,7 @@ D-42（文字与附件必然是两条消息）、**M4 志愿分配 / M5 匿名�
 M0 网关方案 §4 / §5 / §6 / §7、**U1 触发层**（`docs/ARCHITECTURE-UPGRADE.md` §4，
 含 §4.5「门禁只拦文本、资源走独立分支」的顺序）与 **U6 方向人拍板**（§5.3）。
 
-顶层前缀 **9 条**（原 8 条 + U6 的 `我们要做的方向是：`）；"群内可用 / 私聊可用"的条数
+顶层前缀 **10 条**（原 8 条 + U6 的 `我们要做的方向是：` + U4 的 `改派 T3 @某人`）；"群内可用 / 私聊可用"的条数
 由 `replies.COMMANDS` 按作用域派生，**不写死**（D-76）。
 
 进出都是纯数据（``Inbound`` / ``dict`` / ``Outcome``）：不联网、不发消息、不读文件，
@@ -29,7 +29,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Sequence
 
-from src.gateway import complete, preference, register, replies, vote
+from src.gateway import change, complete, preference, register, replies, vote
 from src.gateway.events import Inbound, Mention, Outcome, Reply, reply
 
 __all__ = [
@@ -282,7 +282,7 @@ def _by_prefix(
     source_title: str = "",
     group_chat_id: str = "",
 ) -> Outcome:
-    """D-33 的第 3、4 步：**9 条**前缀精确匹配 → 都不中就是指令列表（T01）。"""
+    """D-33 的第 3、4 步：**10 条**前缀精确匹配 → 都不中就是指令列表（T01）。"""
     text = strip_mentions(inbound.text, inbound.mentions).strip()
 
     if text.startswith("作业书"):
@@ -330,6 +330,20 @@ def _by_prefix(
     if text.startswith("报告"):
         # M7 触发点 = 方案 A（D-64）：只有组长能在群里要报告
         return _report(inbound, roster, assignments)
+    if text.startswith("改派"):
+        # U4 第 10 条（换人，§8.1）：群 + 组长直改即生效 → 台账 + 群公示。
+        # 与既有 9 条前缀不互撞（§5.1 硬约束 1）："改派"不是任何一条的前缀、也没有
+        # 任何一条是它的前缀。前置不足（没花名册 / 不是组长 / 卡不存在）都在纯函数里
+        # 判死，**都不落盘**。
+        return change.reassign(
+            text,
+            inbound,
+            roster,
+            cards,
+            assignments,
+            now,
+            group_chat_id=group_chat_id,
+        )
 
     # 兜底（D-33 第 4 步）：群聊里**只有被 @ 过**才回清单 —— 没 @ 的已经在门禁处
     # 静默掉了（§4.5 末条）；私聊沿用 L5，照回。

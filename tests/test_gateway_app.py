@@ -1307,3 +1307,49 @@ def test_a_change_lands_in_the_ledger_and_in_the_state(env):
     record = store.load_assignments()[0]
     assert (record.assignee, record.source) == ("ou_wang", "leader")
     assert [c.kind for c in store.load_changes()] == ["reassign"]
+
+
+def _reassign_mentions(open_id, name):
+    return (
+        Mention(key="@_user_1", open_id="ou_bot", name="机器人007", is_bot=True),
+        Mention(key="@_user_2", open_id=open_id, name=name),
+    )
+
+
+def test_reassign_lands_in_the_ledger_and_survives_the_next_settlement(env):
+    """U4 换人端到端 + §8.4 的核心回归：结算不许把人工改派抢回去。"""
+    gateway, store, sender, _ = env
+    store.save_members(
+        Roster(
+            leader="ou_zhang",
+            members=[
+                Member(open_id="ou_zhang", name="张三"),
+                Member(open_id="ou_li", name="李四"),
+                Member(open_id="ou_wang", name="王五"),
+            ],
+            registered_at="2026-09-13T09:00:00",
+            confirmed_by="ou_zhang",
+        )
+    )
+    store.save_assignments(
+        [AssignmentRecord(task_id="T1", assignee="ou_li", source="volunteer_1")]
+    )
+
+    gateway.handle(
+        _inbound(
+            "改派 T1 @_user_2",
+            sender_open_id="ou_zhang",
+            mentions=_reassign_mentions("ou_wang", "王五"),
+        )
+    )
+
+    record = store.load_assignments()[0]
+    assert (record.assignee, record.source) == ("ou_wang", "leader")
+    assert [c.kind for c in store.load_changes()] == ["reassign"]
+    assert "改派好了" in sender.texts[-1]
+
+    # 下一次结算（M4）想按志愿把 T1 给回李四 —— 条件写只填没人负责的卡，一个字都不动
+    gateway._save_assignments(
+        store, [{"task_id": "T1", "assignee": "ou_li", "source": "volunteer_1"}]
+    )
+    assert store.load_assignments()[0].assignee == "ou_wang"
