@@ -28,8 +28,10 @@ from src.models import AssignmentRecord, Roster, TaskCard
 __all__ = [
     "REASSIGN_PATTERN",
     "RELEASE_PATTERN",
+    "CLAIM_PATTERN",
     "reassign",
     "release",
+    "claim",
     "name_of",
 ]
 
@@ -37,6 +39,7 @@ __all__ = [
 # （@ 段已被 ``strip_mentions`` 剥掉）—— "改派 T3 谢谢" 落提示，不猜。
 REASSIGN_PATTERN = re.compile(r"^改派\s*[Tt](\d+)\s*$")
 RELEASE_PATTERN = re.compile(r"^我不做了\s*[Tt](\d+)\s*$")
+CLAIM_PATTERN = re.compile(r"^我想接\s*[Tt](\d+)\s*$")
 
 
 def reassign(
@@ -181,6 +184,105 @@ def release(
             "update": {"task_id": task_id, "assignee": ""},
         },
     )
+
+
+def claim(
+    text: str,
+    inbound: Inbound,
+    roster: Roster | None = None,
+    cards: Sequence[TaskCard] = (),
+    assignments: Sequence[AssignmentRecord] = (),
+    now: datetime | None = None,
+    group_chat_id: str = "",
+) -> Outcome:
+    """``我想接 T3`` —— 私聊、是花名册成员（§7.1 第 12 条 / §8.1）。
+
+    本人私聊发出即确认接手：待认领的卡（``assignee == ""``）写上自己 + 台账 + 群公示。
+    非成员不给办事（§9.1 第 14 条），但**不静默** —— 回同一句人话 + 指路「登记」。
+
+    **认领竞态**（§8.2 / §9.1 第 16 条）：终局判据 = ``assignee`` 是否为空，判据与写入
+    在同一个 ``mutate_change()`` 里求值（``update.expect_empty``）⇒ 卡不可能落到两个人
+    名下。锁内判据万一不成立（``fallback``），app 层改发第 16 条那句、**不发假公示**。
+    """
+    if inbound.chat_type != "p2p":
+        return Outcome(replies=(reply(inbound, replies.CLAIM_NEED_DM),))
+
+    match = CLAIM_PATTERN.match((text or "").strip())
+    if not match:
+        return Outcome(replies=(reply(inbound, replies.CLAIM_FORM),))
+
+    me = inbound.sender_open_id
+    known = {member.open_id for member in (getattr(roster, "members", None) or ())}
+    if not me or (known and me not in known):
+        return Outcome(replies=(reply(inbound, replies.CLAIM_NOT_MEMBER),))
+
+    task_id = f"T{match.group(1)}"
+    record = next((r for r in (assignments or ()) if r.task_id == task_id), None)
+    if record is None:
+        return Outcome(replies=(reply(inbound, replies.claim_unknown(task_id, assignments)),))
+    if record.assignee:
+        if record.assignee == me:
+            # 幂等：已经在你自己名下，没有变化 ⇒ 不落盘、不公示，但不静默
+            return Outcome(
+                replies=(reply(inbound, replies.CLAIM_ALREADY.format(task_id=task_id)),)
+            )
+        # §9.1 第 16 条：先到先得（D-52），并把剩余能接的卡一并给出
+        return Outcome(
+            replies=(
+                reply(
+                    inbound,
+                    replies.claim_taken(
+                        task_id, name_of(roster, record.assignee), assignments
+                    ),
+                ),
+            )
+        )
+
+    stamp = (now or datetime.now()).isoformat(timespec="seconds")
+    module = _module_name(task_id, cards)
+    out = [reply(inbound, replies.CLAIM_OK.format(task_id=task_id, module=module))]
+    if group_chat_id:
+        out.append(
+            Reply(
+                chat_id=group_chat_id,
+                text=replies.CLAIM_ANNOUNCED.format(
+                    name=name_of(roster, me), task_id=task_id, module=module
+                ),
+            )
+        )
+    return Outcome(
+        replies=tuple(out),
+        save_change={
+            "change": {
+                "at": stamp,
+                "by": me,
+                "kind": "claim",
+                "task_id": task_id,
+                "from_user": "",                    # 从待认领池里拿的，没有前任
+                "to_user": me,
+                "reason": "",
+                "confirmed_by": [me],
+            },
+            # source 不动（认领改的是"谁做"）—— 同上，不臆想新枚举值，真相在台账里
+            "update": {"task_id": task_id, "assignee": me, "expect_empty": True},
+            # 锁内判据不成立时改发的句子（认领竞态，§9.1 第 16 条）；人名由 app 层填
+            "fallback": {
+                "chat_id": inbound.chat_id,
+                "template": replies.CLAIM_TAKEN,
+                "fields": {"task_id": task_id, "tasks": _pool_text(assignments, task_id)},
+            },
+        },
+    )
+
+
+def _pool_text(assignments: Sequence[AssignmentRecord], exclude: str = "") -> str:
+    """还剩哪些能接（照 `PREFERENCE_BAD` 的形态列编号，不催人）。"""
+    ids = [
+        record.task_id
+        for record in (assignments or ())
+        if not record.assignee and record.task_id != exclude
+    ]
+    return "、".join(ids) if ids else replies.CLAIM_NO_POOL
 
 
 def _module_name(task_id: str, cards: Sequence[TaskCard]) -> str:

@@ -1165,3 +1165,133 @@ def test_the_release_announcement_teaches_a_direct_message_action():
     announced = outcome.replies[1].text
     assert "私聊我发「我想接 T1」" in announced
     assert "@我" not in announced
+
+
+# ---------- U4 补位认领（§8.1 / §9.1 第 16 条）----------
+
+
+def test_a_member_can_claim_a_pool_card():
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "", "auto"), ("T2", "ou_wang", "auto"))
+
+    outcome = route(
+        _dm("我想接 T1"),
+        {},
+        roster,
+        cards=cards,
+        assignments=assignments,
+        group_chat_id="c1",
+    )
+
+    assert outcome.replies[0].chat_id == "dm1"
+    assert outcome.replies[0].text == replies.CLAIM_OK.format(task_id="T1", module="模块1")
+    assert "李四 接了 T1（模块1）" in outcome.replies[1].text
+    assert outcome.replies[1].chat_id == "c1"
+    assert outcome.save_change["change"] == {
+        "at": outcome.save_change["change"]["at"],
+        "by": "ou_li",
+        "kind": "claim",
+        "task_id": "T1",
+        "from_user": "",
+        "to_user": "ou_li",
+        "reason": "",
+        "confirmed_by": ["ou_li"],
+    }
+    # 认领只改人（source 不动），且**锁内判据**：卡必须还没人负责（§8.2 认领竞态）
+    assert outcome.save_change["update"] == {
+        "task_id": "T1",
+        "assignee": "ou_li",
+        "expect_empty": True,
+    }
+    # 竞态兜底：锁内判据不成立时 app 层改发第 16 条那句（不发假公示）
+    assert outcome.save_change["fallback"]["chat_id"] == "dm1"
+    assert "刚被" in outcome.save_change["fallback"]["template"]
+
+
+def test_claiming_a_taken_card_names_the_winner():
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "ou_wang", "auto"), ("T2", "", "auto"))
+
+    outcome = route(
+        _dm("我想接 T1"),
+        {},
+        roster,
+        cards=cards,
+        assignments=assignments,
+        group_chat_id="c1",
+    )
+
+    assert outcome.save_change is None
+    assert "T1 刚被王五接走了" in outcome.replies[0].text
+    assert "T2" in outcome.replies[0].text                 # 剩余可认领卡
+
+
+def test_claiming_a_card_that_is_already_yours_changes_nothing():
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "ou_li", "auto"))
+
+    outcome = route(_dm("我想接 T1"), {}, roster, cards=cards, assignments=assignments)
+
+    assert outcome.save_change is None
+    assert outcome.replies[0].text == replies.CLAIM_ALREADY.format(task_id="T1")
+
+
+def test_claim_unknown_card_lists_only_the_pool():
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "", "auto"), ("T2", "ou_wang", "auto"))
+
+    outcome = route(_dm("我想接 T9"), {}, roster, cards=cards, assignments=assignments)
+
+    assert outcome.save_change is None
+    assert "没有 T9 这张卡" in outcome.replies[0].text
+    assert "T1" in outcome.replies[0].text
+    assert "T2" not in outcome.replies[0].text             # 有人做的卡不算可认领
+
+
+def test_claiming_when_the_pool_is_empty_says_so():
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "ou_wang", "auto"))
+
+    outcome = route(_dm("我想接 T1", open_id="ou_li"), {}, roster, cards=cards,
+                    assignments=assignments)
+
+    assert outcome.replies[0].text == replies.claim_taken("T1", "王五", assignments)
+    assert replies.CLAIM_NO_POOL in outcome.replies[0].text
+
+
+def test_a_stranger_cannot_claim_but_is_not_ignored():
+    """§9.1 第 14 条：非成员不给办事 + 指路「登记」，**不静默**、不落盘。"""
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "", "auto"))
+
+    outcome = route(
+        _dm("我想接 T1", open_id="ou_stranger"),
+        {},
+        roster,
+        cards=cards,
+        assignments=assignments,
+        group_chat_id="c1",
+    )
+
+    assert outcome.save_change is None
+    assert outcome.replies[0].text == replies.CLAIM_NOT_MEMBER
+
+
+def test_claim_needs_a_card_id_and_a_direct_message():
+    cards, roster = _m4_fixtures()
+    assignments = _assignments(("T1", "", "auto"))
+
+    no_id = route(_dm("我想接"), {}, roster, cards=cards, assignments=assignments)
+    in_group = route(
+        _inbound("我想接 T1", sender_open_id="ou_li"),
+        {},
+        roster,
+        cards=cards,
+        assignments=assignments,
+        group_chat_id="c1",
+    )
+
+    assert no_id.replies[0].text == replies.CLAIM_FORM
+    assert no_id.save_change is None
+    assert in_group.replies[0].text == replies.CLAIM_NEED_DM
+    assert in_group.save_change is None

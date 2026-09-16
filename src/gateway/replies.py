@@ -111,6 +111,17 @@ __all__ = [
     "RELEASE_NOT_YOURS",
     "RELEASE_OK",
     "RELEASE_ANNOUNCED",
+    "CLAIM_NEED_DM",
+    "CLAIM_FORM",
+    "CLAIM_NOT_MEMBER",
+    "CLAIM_UNKNOWN",
+    "CLAIM_NO_POOL",
+    "CLAIM_TAKEN",
+    "CLAIM_ALREADY",
+    "CLAIM_OK",
+    "CLAIM_ANNOUNCED",
+    "claim_unknown",
+    "claim_taken",
     "REGISTER_FORM",
     "REGISTER_FORM_BAD",
     "REGISTER_NEED_LEADER",
@@ -166,6 +177,7 @@ COMMANDS = (
     Command("我们要做的方向是：", (GROUP,), "群里发「我们要做的方向是：…」，直接定方向，不用投票"),
     Command("改派 T3 @某人", (GROUP,), "组长在群里发「改派 T3 @某人」，换人做这张卡"),
     Command("我不做了 T3", (DM,), "私聊发「我不做了 T3」，把这张卡退回待认领"),
+    Command("我想接 T3", (DM,), "私聊发「我想接 T3」，认领一张待认领的卡"),
 )
 
 
@@ -353,6 +365,39 @@ RELEASE_ANNOUNCED = (
     "{name} 退出了 {task_id}（{module}），这张卡回到待认领。"
     "想接的私聊我发「我想接 {task_id}」。"
 )
+
+
+# ---- U4 任务变更：补位认领（§8.1 / §9.1 第 16 条）----
+CLAIM_NEED_DM = "「我想接 T3」私聊我发就行，群里说会吵到别人。"
+CLAIM_FORM = "要说接哪张卡：私聊发「我想接 T3」就行。"
+# 教的是群里的「登记」⇒ 带上「@我」（这门禁只放行 @ 了机器人的群文本，§9.1 第 4 条）
+CLAIM_NOT_MEMBER = (
+    "这份花名册里没有你。先在群里 @我 回「登记」把自己 @ 进去，"
+    "再私聊我说「我想接 T3」。"
+)
+CLAIM_UNKNOWN = "没有 {task_id} 这张卡。现在能认领的是 {tasks}。"
+CLAIM_NO_POOL = "暂时没有别的待认领卡"
+# §9.1 第 16 条：人名是事实槽位，原样注入
+CLAIM_TAKEN = "{task_id} 刚被{name}接走了。现在能认领的是 {tasks}。"
+CLAIM_ALREADY = "{task_id} 现在就在你名下，没改。"
+CLAIM_OK = "接到手了：{task_id}（{module}）。"
+CLAIM_ANNOUNCED = "{name} 接了 {task_id}（{module}）。"
+
+
+def claim_unknown(task_id: str, assignments=()) -> str:
+    """"这个编号我没找到" + 列**可认领**的卡号（§9.1 第 13 条的形态，口径同第 16 条）。"""
+    return CLAIM_UNKNOWN.format(task_id=task_id, tasks=claim_pool(assignments))
+
+
+def claim_pool(assignments=()) -> str:
+    """待认领的卡号清单（§8.3：`assignee == ""` 就是"待认领"）。"""
+    ids = [record.task_id for record in (assignments or ()) if not record.assignee]
+    return "、".join(ids) if ids else CLAIM_NO_POOL
+
+
+def claim_taken(task_id: str, name: str, assignments=()) -> str:
+    """§9.1 第 16 条那句（含剩余可认领卡）。"""
+    return CLAIM_TAKEN.format(task_id=task_id, name=name, tasks=claim_pool(assignments))
 
 
 # ---- 登记（§7.7）----

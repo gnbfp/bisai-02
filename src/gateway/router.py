@@ -5,7 +5,8 @@ D-42（文字与附件必然是两条消息）、**M4 志愿分配 / M5 匿名�
 M0 网关方案 §4 / §5 / §6 / §7、**U1 触发层**（`docs/ARCHITECTURE-UPGRADE.md` §4，
 含 §4.5「门禁只拦文本、资源走独立分支」的顺序）与 **U6 方向人拍板**（§5.3）。
 
-顶层前缀 **11 条**（原 8 条 + U6 的 `我们要做的方向是：` + U4 的 `改派 T3 @某人` / `我不做了 T3`）；"群内可用 / 私聊可用"的条数
+顶层前缀 **12 条**（原 8 条 + U6 的 `我们要做的方向是：` + U4 的三条变更指令
+`改派 T3 @某人` / `我不做了 T3` / `我想接 T3`）；"群内可用 / 私聊可用"的条数
 由 `replies.COMMANDS` 按作用域派生，**不写死**（D-76）。
 
 进出都是纯数据（``Inbound`` / ``dict`` / ``Outcome``）：不联网、不发消息、不读文件，
@@ -282,7 +283,7 @@ def _by_prefix(
     source_title: str = "",
     group_chat_id: str = "",
 ) -> Outcome:
-    """D-33 的第 3、4 步：**11 条**前缀精确匹配 → 都不中就是指令列表（T01）。"""
+    """D-33 的第 3、4 步：**12 条**前缀精确匹配 → 都不中就是指令列表（T01）。"""
     text = strip_mentions(inbound.text, inbound.mentions).strip()
 
     if text.startswith("作业书"):
@@ -330,6 +331,17 @@ def _by_prefix(
     if text.startswith("报告"):
         # M7 触发点 = 方案 A（D-64）：只有组长能在群里要报告
         return _report(inbound, roster, assignments)
+    if text.startswith("我想接"):
+        # U4 第 12 条（补位认领，§8.1）：私聊 + 花名册成员；与 `我想提议：` 不互撞
+        return change.claim(
+            text,
+            inbound,
+            roster,
+            cards,
+            assignments,
+            now,
+            group_chat_id=group_chat_id,
+        )
     if text.startswith("我不做了"):
         # U4 第 11 条（退出回流，§8.1）：私聊 + 本人是负责人；本人发出即确认退出
         return change.release(

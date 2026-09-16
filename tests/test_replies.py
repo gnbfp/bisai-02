@@ -70,15 +70,15 @@ def _roster():
 def test_command_list_is_derived_from_the_scope_table():
     """D-76：条数**不写死** —— 两份清单都从 COMMANDS 按作用域数出来。
 
-    当前派生 = 群 8 / 私聊 6（含「报告」这类只在群里能用的）：U4 第 10、11 条
-    （改派 / 退出）已落地；第 12 条（认领）落地后同一段代码自动变成 8 / 7
-    （§12.3 第 15 条），这里不需要改逻辑，只更新数字。
+    当前派生 = 群 8 / 私聊 7（含「报告」这类只在群里能用的）—— §12.3 第 15 条的
+    **终值**：U4 第 10–12 条（改派 / 退出 / 认领）已全部落地，条数全部由 COMMANDS
+    按作用域派生（D-76），下面这两个数字只是"派生结果"的快照。
     """
     group = [item for item in replies.COMMANDS if item.usable_in(replies.GROUP)]
     dm = [item for item in replies.COMMANDS if item.usable_in(replies.DM)]
 
     assert len(group) == 8
-    assert len(dm) == 6
+    assert len(dm) == 7
     assert replies.COMMAND_LIST_TEXT == replies.command_list(replies.GROUP)
     assert replies.COMMAND_LIST_DM == replies.command_list(replies.DM)
     assert len(replies.COMMAND_LIST_TEXT.splitlines()) == len(group) + 1     # 表头一行

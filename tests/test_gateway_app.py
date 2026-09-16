@@ -10,7 +10,7 @@ import pytest
 
 from src.gateway import app as app_module
 from src.gateway import replies
-from src.gateway.events import ImageOut, Inbound, Mention, Outcome
+from src.gateway.events import ImageOut, Inbound, Mention, Outcome, Reply
 from src.gateway.reminder import TIER_T1
 from src.intelligence.extract import ExtractError
 from src.intelligence.llm import LLMError
@@ -1392,3 +1392,74 @@ def test_released_card_goes_back_to_the_pool_and_is_announced(env):
     assert sender.sent[0].chat_id == "dm1"             # 先回本人
     assert sender.sent[-1].chat_id == "c1"             # 再播群公示
     assert "小李 退出了 T1" in sender.sent[-1].text
+
+
+def _pool_roster():
+    return Roster(
+        leader="ou_zhang",
+        members=[
+            Member(open_id="ou_zhang", name="张三"),
+            Member(open_id="ou_b", name="小李"),
+            Member(open_id="ou_c", name="小赵"),
+        ],
+        registered_at="2026-09-13T09:00:00",
+        confirmed_by="ou_zhang",
+    )
+
+
+def test_claim_then_the_loser_gets_the_conflict_line(env):
+    """§8.2 认领竞态：先到者拿到卡，后到者回第 16 条那句（含先到者姓名 + 剩余卡）。"""
+    gateway, store, sender, _ = env
+    store.save_members(_pool_roster())
+    store.save_assignments([AssignmentRecord(task_id="T1", assignee="", source="auto")])
+
+    gateway.handle(
+        _inbound("我想接 T1", chat_type="p2p", chat_id="dm-b", sender_open_id="ou_b")
+    )
+    assert store.load_assignments()[0].assignee == "ou_b"
+    assert [c.kind for c in store.load_changes()] == ["claim"]
+    assert "小李 接了 T1" in sender.texts[-1]
+
+    gateway.handle(
+        _inbound("我想接 T1", chat_type="p2p", chat_id="dm-c", sender_open_id="ou_c")
+    )
+    assert store.load_assignments()[0].assignee == "ou_b"      # 卡没有落到两个人名下
+    assert len(store.load_changes()) == 1                     # 后到者不产生台账
+    assert sender.sent[-1].chat_id == "dm-c"
+    assert "刚被小李接走了" in sender.texts[-1]
+
+
+def test_a_lost_race_replaces_the_announcement_instead_of_lying(env):
+    """锁内判据不成立（真并发才会走到）⇒ 改发第 16 条那句，**不发假公示**、不写盘。"""
+    gateway, store, sender, _ = env
+    store.save_members(_pool_roster())
+    store.save_assignments([AssignmentRecord(task_id="T1", assignee="ou_b", source="auto")])
+
+    outcome = Outcome(
+        replies=(Reply(chat_id="c1", text="这条假公示不该发出去"),),
+        save_change={
+            "change": {
+                "at": "2026-09-17T22:00:00",
+                "by": "ou_c",
+                "kind": "claim",
+                "task_id": "T1",
+                "from_user": "",
+                "to_user": "ou_c",
+                "confirmed_by": ["ou_c"],
+            },
+            "update": {"task_id": "T1", "assignee": "ou_c", "expect_empty": True},
+            "fallback": {
+                "chat_id": "dm-c",
+                "template": replies.CLAIM_TAKEN,
+                "fields": {"task_id": "T1", "tasks": replies.CLAIM_NO_POOL},
+            },
+        },
+    )
+
+    gateway._deliver(outcome, store)
+
+    assert sender.sent[0].chat_id == "dm-c"
+    assert "刚被小李接走了" in sender.texts[0]
+    assert all("假公示" not in text for text in sender.texts)
+    assert store.load_assignments()[0].assignee == "ou_b"
+    assert store.load_changes() == []
