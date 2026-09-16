@@ -1,8 +1,9 @@
 # U2 验收清单（工作空间隔离 · 落地后照此跑）
 
 > **依据**：`docs/ARCHITECTURE-UPGRADE.md` §7.2 / §7.4（私聊归属单值映射）、§3.5（`group_chat_id` 处置）、§12.5（回归项）；对齐卡 `docs/evidence/2026-09-16-u2-single-value-mapping-alignment.md` §5 的签字口径（#5 / #7 两条改动）。
-> **什么时候跑**：U2 **落地并入库之后**；**排在 9/18 彩排之后**（穿透批先跑 —— 对齐卡 §3 的顺序约束）。
+> **什么时候跑**：U2 **已落地并入库（`21fd34a`，2026-09-17）** ⇒ 可以跑；**排在 9/18 彩排之后**（穿透批先跑 —— 对齐卡 §3 的顺序约束）。
 > **前置**：`pytest` 全绿（把数字记下来）；**MVP 的 `data\` 全程只读**，一个字都不许动。
+> **单测层已过（2026-09-17 本机复跑）**：`python -m pytest -q --basetemp=<可写目录>` ⇒ **456 passed**。**`--basetemp` 不是可选项**：默认 `%TEMP%\pytest-of-<用户>` 在本机沙箱下 `PermissionError`（`WinError 5`），**那是环境坑、不是代码红** ⇒ §4 / §5 的**单测主判据**据此判过；§1 / §2 / §3 的**真机槽**仍未跑。
 > **起实例 / 留日志**：照 `docs\REHEARSAL-0918.md` §0 那段命令（**日志文件名带时间戳，不许覆盖**）。
 
 ---
@@ -83,6 +84,8 @@
 
 **为什么**：`mutate_raw()` / `mutate_many()` 原来是**无条件写盘**（fn 原样返回也会写）。U2 把它改成**锁内序列化比较：新值 == 旧值 ⇒ 不写盘**（**已落地 `5dcb019`**：`src\storage.py` 的 `mutate_raw()` / `mutate_many()` 走 `_write_if_changed_unlocked()`）。
 
+**状态（2026-09-17）**：**单测已过** —— `mutate_raw(name, lambda doc: doc)` 原样返回不写盘等 3 条在 `tests/test_storage.py`（`test_mutate_writes_nothing_when_the_value_is_unchanged` / `test_mutate_does_not_materialize_a_missing_file_without_a_change` / `test_mutate_still_writes_when_the_value_changes`）；**手工步（`LastWriteTime` 那条）未跑**。
+
 **单测（主判据）**
 
 - `mutate_raw(name, lambda doc: doc)`（**原样返回**）⇒ 文件**字节与 mtime 都不变**。
@@ -105,6 +108,8 @@ Get-Item .\data-upgrade\index.json | Select-Object LastWriteTime
 ## 5. 回归（对齐卡 #7）：投票块缺 `chat_id` ⇒ 不豁免、不算票
 
 **为什么**：`exempt()` / `accept()` 里的 `or state.get("group_chat_id")` 回退已拆掉（**已落地 `ceaf62a`**，测试 = `test_a_window_block_without_chat_id_neither_exempts_nor_counts`）—— 留着等于让全局单值继续对投票生效。
+
+**状态（2026-09-17）**：**单测已过** —— `test_a_window_block_without_chat_id_neither_exempts_nor_counts`（`tests/test_vote.py`）；**手工步未跑**。
 
 **单测（主判据）**
 
@@ -137,7 +142,7 @@ Get-Item .\data-upgrade\index.json | Select-Object LastWriteTime
 
 ## 6. 收工
 
-- [ ] 三条证据槽 + 两条回归，每项写 **✅ / ❌ + 时间戳 + 关键日志行** → 新证据文件 `docs\evidence\<日期>-u2-acceptance.md`
+- [ ] 三条证据槽（**真机**）+ 两条回归（**单测已过**，见 §4 / §5），每项写 **✅ / ❌ + 时间戳 + 关键日志行** → 新证据文件 `docs\evidence\<日期>-u2-acceptance.md`
 - [ ] 任何 ❌ **回填材料**：§7.4（归属）/ §3.5（`group_chat_id` 处置）/ §12.5（回归项）—— 别只在群里口头说
 - [ ] 确认 **MVP `data\` 全程只读**（源盘逐文件哈希前后一致，照 `tools\migrate_workspace.py` 的口径算一次）
-- [ ] §7.4 的三条证据槽在材料里逐条改状态（**未验证 → 实测**）
+- [ ] §7.4 的三条证据槽在材料里逐条改状态（**单测已过已回填；真机部分仍 `[ ]`**）
