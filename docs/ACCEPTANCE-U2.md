@@ -3,7 +3,7 @@
 > **依据**：`docs/ARCHITECTURE-UPGRADE.md` §7.2 / §7.4（私聊归属单值映射）、§3.5（`group_chat_id` 处置）、§12.5（回归项）；对齐卡 `docs/evidence/2026-09-16-u2-single-value-mapping-alignment.md` §5 的签字口径（#5 / #7 两条改动）。
 > **什么时候跑**：U2 **已落地并入库（`21fd34a`，2026-09-17）** ⇒ 可以跑；**排在 9/18 彩排之后**（穿透批先跑 —— 对齐卡 §3 的顺序约束）。
 > **前置**：`pytest` 全绿（把数字记下来）；**MVP 的 `data\` 全程只读**，一个字都不许动。
-> **单测层已过（2026-09-17 本机复跑）**：`python -m pytest -q --basetemp=<可写目录>` ⇒ **456 passed**。**`--basetemp` 不是可选项**：默认 `%TEMP%\pytest-of-<用户>` 在本机沙箱下 `PermissionError`（`WinError 5`），**那是环境坑、不是代码红** ⇒ §4 / §5 的**单测主判据**据此判过；§1 / §2 / §3 的**真机槽**仍未跑。
+> **单测 + 真机都已过（2026-09-17）**：`python -m pytest -q --basetemp=<可写目录>` ⇒ **456 passed**；**§1–§5 已按本清单真机跑过一轮、全过** —— 证据 = `docs\evidence\2026-09-17-u2-acceptance.md`（提交 `86055e2`，被测提交 `21fd34a`）。**遗留**：§5 的 T05 格未测、§2 只跑了 2 条私聊归属指令（按人补测）。**`--basetemp` 不是可选项**：默认 `%TEMP%\pytest-of-<用户>` 在本机沙箱下 `PermissionError`（`WinError 5`）—— **那是环境坑、不是代码红**。
 > **起实例 / 留日志**：照 `docs\REHEARSAL-0918.md` §0 那段命令（**日志文件名带时间戳，不许覆盖**）。
 
 ---
@@ -23,6 +23,7 @@
 
 **步骤**
 
+0. **前置**：这个群得先有 `cards`（投 PDF → `@机器人 作业书`）**和** `roster`（`@机器人 登记`）—— **缺任一个，私聊只会回 `PREFERENCE_NEED_ROSTER`，首行不会有来源标题**（真机验收第 1 次就卡在这，见证据 §0.3）。
 1. 甲在 **A 群**发一句（@ 或不 @ 都行 —— 但必须真的发出去）。
 2. 甲在 **B 群**发一句。
 3. 甲在**私聊**发一条依赖归属的指令（如 `你想做哪一块` 或 `报告`）。
@@ -84,7 +85,7 @@
 
 **为什么**：`mutate_raw()` / `mutate_many()` 原来是**无条件写盘**（fn 原样返回也会写）。U2 把它改成**锁内序列化比较：新值 == 旧值 ⇒ 不写盘**（**已落地 `5dcb019`**：`src\storage.py` 的 `mutate_raw()` / `mutate_many()` 走 `_write_if_changed_unlocked()`）。
 
-**状态（2026-09-17）**：**单测已过** —— `mutate_raw(name, lambda doc: doc)` 原样返回不写盘等 3 条在 `tests/test_storage.py`（`test_mutate_writes_nothing_when_the_value_is_unchanged` / `test_mutate_does_not_materialize_a_missing_file_without_a_change` / `test_mutate_still_writes_when_the_value_changes`）；**手工步（`LastWriteTime` 那条）未跑**。
+**状态（2026-09-17）**：**单测 + 真机都已过** —— 单测 = `tests/test_storage.py` 的 `test_mutate_writes_nothing_when_the_value_is_unchanged` / `test_mutate_does_not_materialize_a_missing_file_without_a_change` / `test_mutate_still_writes_when_the_value_changes`；真机 = 验收 §4（`20:15:46` 写、`20:15:52` 值不变 ⇒ `LastWriteTime` 不动）。
 
 **单测（主判据）**
 
@@ -109,7 +110,7 @@ Get-Item .\data-upgrade\index.json | Select-Object LastWriteTime
 
 **为什么**：`exempt()` / `accept()` 里的 `or state.get("group_chat_id")` 回退已拆掉（**已落地 `ceaf62a`**，测试 = `test_a_window_block_without_chat_id_neither_exempts_nor_counts`）—— 留着等于让全局单值继续对投票生效。
 
-**状态（2026-09-17）**：**单测已过** —— `test_a_window_block_without_chat_id_neither_exempts_nor_counts`（`tests/test_vote.py`）；**手工步未跑**。
+**状态（2026-09-17）**：**单测 + 真机都已过** —— 单测 = `test_a_window_block_without_chat_id_neither_exempts_nor_counts`（`tests/test_vote.py`）；真机 = 验收 §5 的**正面对照**（3 人花名册冻结、群内裸数字计票、`过半 2/2` 落定）。**T05 那格（窗关后再发裸数字应静默）本轮没测** ⇒ 归 `docs\REHEARSAL-0918.md` 格 B4。
 
 **单测（主判据）**
 
@@ -142,7 +143,7 @@ Get-Item .\data-upgrade\index.json | Select-Object LastWriteTime
 
 ## 6. 收工
 
-- [ ] 三条证据槽（**真机**）+ 两条回归（**单测已过**，见 §4 / §5），每项写 **✅ / ❌ + 时间戳 + 关键日志行** → 新证据文件 `docs\evidence\<日期>-u2-acceptance.md`
-- [ ] 任何 ❌ **回填材料**：§7.4（归属）/ §3.5（`group_chat_id` 处置）/ §12.5（回归项）—— 别只在群里口头说
-- [ ] 确认 **MVP `data\` 全程只读**（源盘逐文件哈希前后一致，照 `tools\migrate_workspace.py` 的口径算一次）
-- [ ] §7.4 的三条证据槽在材料里逐条改状态（**单测已过已回填；真机部分仍 `[ ]`**）
+- [x] 三条证据槽（**真机**）+ 两条回归（**单测 + 真机都已过**）—— 证据 = `docs\evidence\2026-09-17-u2-acceptance.md`（`86055e2`）：每条都写了 ✅ / 时间戳 / 关键日志行
+- [x] 任何 ❌ **回填材料**：§7.4（归属）/ §3.5（`group_chat_id` 处置）/ §12.5（回归项）—— **本轮无 ❌**（遗留项见证据 §7，已登记材料）
+- [x] 确认 **MVP `data\` 全程只读** —— 真机验收 §6.4：`data\` **21** 个文件的 `tree_digest` 与迁移 `SOURCE.sha256` **逐字符相同**（`8948C043…`）
+- [x] §7.4 的三条证据槽在材料里逐条改状态（**已翻实测**，见 §7.4）

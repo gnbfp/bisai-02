@@ -183,6 +183,7 @@ python tools\migrate_workspace.py --dest-root data-upgrade\_rehearsal --rollback
 - ❌ **不许把机器绝对路径写进 `index.json`**（§5）。
 - ❌ **不许只写 `operator` 不写 `verifier`**（等于没做二次确认）。
 - ⚠️ **手工编辑 JSON 前先停进程**（2.3）。
+- ⚠️ **`data-upgrade\` 顶层的扁平残留（含 `_rehearsal\`）是「迁移前快照」—— 别手工删**：④-a 之后**运行时只读** `data-upgrade\index.json` 与 `data-upgrade\workspaces\<群 chat_id>\`，顶层那批 `cards.json` / `members.json` / `state.json` … **运行时不读**（「盘上有」≠「机器人看得见」）⇒ 要清就走 §2 的动作 + §3 台账 + §4 复核人，**别手删**。
 
 ---
 

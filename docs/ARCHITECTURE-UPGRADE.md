@@ -142,7 +142,7 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 
 ### 3.5 未验证（不得当成通过）
 
-- [ ] ≥2 个工作空间**同时**活跃时的并发写（`index.json` 是全局热点；两层防 = `mutate_raw()` 的进程级锁 + 「值没变就不写盘」—— **第 2 层已落地（v1.26，`5dcb019`）**，但**并发本身仍未真机验**）
+- [ ] ≥2 个工作空间**同时**活跃时的并发写（`index.json` 是全局热点；两层防 = `mutate_raw()` 的进程级锁 + 「值没变就不写盘」—— **第 2 层已落地（v1.26，`5dcb019`）**）。**部分覆盖**：真机验收 §3 跑了「两群交替写 `index.json`」（5 轮、10 条 / 9 次写盘、无丢更新）；**同毫秒级真并发仍未验**。
 - [ ] 迁移**中断**（复制到一半）的现场处置：目前靠「先备份 + 重跑幂等」兜，未演练
 - [ ] 磁盘占用/清理策略（`uploads\` 随群数线性增长）
 - [x] **`state.group_chat_id` 的处置 —— 已落地（v1.27，`21fd34a`）**：**停写 + 只读**。**实测**：写点检索（`"group_chat_id"] =` 与 `"group_chat_id":`）在 `src/` 下 **0 命中**；`_remember_group()` 已整段删掉（只在 `src/gateway/workspace.py` 的 docstring 里作为判据出处被提到）。仍**读**的 7 处全部是**旧数据兼容回退** —— `src/gateway/router.py` 1 处（`_proposal()`）、`src/gateway/preference.py` 2 处、`src/gateway/vote.py` 4 处。归属真源从此 = `index.json` 的 `user_last_group`（§7.2）。
@@ -416,9 +416,9 @@ if not normal:        # 空列表 / 全是 ambiguous —— 都走无评分点�
 
 ### 7.4 未验证
 
-- [ ] **真机 · 双群用户私聊**（证据槽 = `docs\ACCEPTANCE-U2.md` §1）：甲先在 A 群互动、再去 B 群互动，随后私聊 ⇒ 清单必须来自 **B 群**。**单测已过（v1.27，`21fd34a`）** = `test_the_binding_moves_to_the_last_group_that_spoke`（`tests/test_workspace.py`）+ `test_the_binding_follows_the_last_group_message`（`tests/test_gateway_app.py`）。**真机未跑。**
-- [ ] **真机 · 未绑定用户私聊 ⇒ `NEED_GROUP`**（跑法 = `docs\ACCEPTANCE-U2.md` §2）：**现状不可复现**（穿透批实测被**转发进群**，见 `docs\evidence\2026-09-16-u2-preflight-penetration.md` §4）—— 它不是「现状回归」，是 **U2 之后才成立的按人行为**。**已落地（v1.27，`21fd34a`）** —— **这就是 U2 ④-c**：判据从**全局** `group_chat_id` 为空换成「**该人无绑定**」，且**覆盖所有**依赖归属的私聊指令（不只 `我想提议：` 一条路径）—— 单测 = `test_every_private_command_without_a_binding_gets_need_group`。**真机未跑。**
-- [ ] **真机 · 绑定写入的并发正确性**（证据槽 = `docs\ACCEPTANCE-U2.md` §3）：同一个人在两群同时发言 ⇒ 最后一次发言胜出。**单测只钉住「后到者胜出」的语义**（= 上面两条），**真并发未验**；**真机未跑**（重复 5 轮）。
+- [x] **真机 · 双群用户私聊 —— 已实测（2026-09-16 20:06–20:07，`docs\evidence\2026-09-17-u2-acceptance.md` §1）**：先 A 再 B ⇒ 私聊**首行** = 群 B 的《数据库课程设计任务书》；回群 A 再私聊 ⇒ 变成群 A 的《营销方案计划》（= 「最后一次胜出」，且 `index.json` 的值随最后一条群消息变）。单测 = `test_the_binding_moves_to_the_last_group_that_spoke` / `test_the_binding_follows_the_last_group_message`。
+- [x] **真机 · 未绑定用户私聊 ⇒ `NEED_GROUP` —— 已实测（同上 §2）**：丙（`ou_038fbabf…`）私聊**两条**归属指令都回 `NEED_GROUP`、`index` 里**不出现**该人，且 `index.json` 的 `mtime` 从 `20:07:09` 到 `20:10:52`（**171 个 1 秒采样点**）**一动不动**；顺序 = **未绑定者先发、成员后发**。**这就是 U2 ④-c** —— 判据在 `app.py` 的 `handle()`：选不到数据域即回 `NEED_GROUP`。**未逐条跑**的指令（`报告` / `完成 T3` / `我想提议：`）⇒ 判据已落地，剩的只是**按人补测**。
+- [x] **真机 · 绑定写入的并发正确性 —— 已实测（同上 §3）**：**5 轮** A / B 群各一句（**10 条群消息 / 9 次写盘**），每轮 `index.json` 的 `mtime` 与日志 `recv` 一一对上，末值 = **后到**那条 ⇒ **无丢更新**。
 
 
 ## 8. 变更机制（审核 7）
@@ -685,7 +685,7 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 | 9/16 下午 | 开工：U1 + U5（都是"说话方式"，一起改最省事）→ 尾部**开 U6**（1 条前缀 + 1 个台账字段，挂在 U1 已动的路由表上，量级最小）—— **已落地（v1.9，2026-09-16 下午）**：U1 门禁（`may_speak()`）+ 群内静默缓存分支 + U5 全量改词（`replies.py` 61 → 72 条）+ U6 人工拍板一起落盘，`pytest` **417 passed**；实现期新增两条口径见 §4.5（登记状态机排在门禁之前）与 §5.3（归并阈值） |
 | **9/17 上午（U2 之前）** | **补丁批**（审核 #2 的 3 条开工后补，见 `docs/evidence/2026-09-16-v1.5-逐条复核.md`）：`tools\migrate_workspace.py`（幂等 + `Resolve-Path` 守卫 + 重跑演练 + `MANIFEST`）+ `data\state.json` 多会话守卫（依据 §3.6）；**手册 `docs\OPERATIONS-U2.md` 与 U2 同批交付**（清空 / 重置 / 改名 + 执行人记录位 `data-upgrade\maintenance.log`）。**属 U2 交付内容、随 U2 一并验收** —— 审核 #12 唯一未过的条件。**分工（v1.10）：`tools\migrate_workspace.py` 归开发；手册 +"重跑演练 + `MANIFEST`"验收口径归架构师** —— 同一批文件不两人同时改。**降级序（v1.13 · PM 2026-09-16 点头）**：挤掉时砍序 = 手册的排障 / 示例段 → 演练留痕行 → 手册的改名章节；**必须留 = 迁移工具（U2 迁移的唯一通道）+ 手册的「清空 / 重置 / 执行人记录字段表」**。**PM 追加条件（2026-09-16）**：砍到改名章节时，**清空 / 重置那节必须留一行「改名本轮不做（P2 开关）」** —— 否则「三动作」会被读成两动作（手册 §0 / §2 已把这行写死）。**v1.11 追加一条**：删掉 `run-upgrade.ps1` 的 `-Echo` 死开关 —— 它传 `--echo`，而 `src/gateway/app.py` 的 argparse 只认 `--seconds` / `--quiet` ⇒ 不带 `-Probe` 启动必 `exit 2`（`--echo` 只有 `tools\probe_feishu.py` 认），建议直接删。**v1.12 追加（开发，2026-09-16）**：`tools\migrate_workspace.py` **已落地**（幂等 + `Resolve-Path` 守卫 + `MANIFEST`；`tests\test_migrate_workspace.py` **17 条**钉住幂等 / 守卫 / `pending_file` 跨会话，**变异验证 3/3 被咬住**），证据 = `docs\evidence\2026-09-16-migrate-workspace-tool-rehearsal.md`；**"重跑演练"的验收仍归架构师**（§13 那行不勾）。**并订正 v1.11 的 `-Echo` 结论**：它不是"完全死"—— `run-upgrade.ps1 -Probe -Echo` 这条路径**是通的**（`--echo` 由 `tools\probe_feishu.py` 认），只有"**不带 `-Probe`**"才必 `exit 2`；**PM 2026-09-16 选 ②**：只在 `-Probe` 时透传 `--echo`（已落地，见 §13 与证据文件 §12）；另 **§11 的数字按 PM 指示改为"复跑命令 + 最近一次输出"（§11 复核见 v1.13 ①）** |
 | 9/17 | U2 + U3 + **U4 最小集**（换人 / 退出回流 / 加入补位 + 变更台账 + 群公示）→ **收工冻结**（之后只修演示阻塞级问题） |
-| **U2 落地（v1.27，2026-09-17）** | **已落地，一笔 = `21fd34a`**：两段式工作空间（`index.json` + `user_last_group` 单值映射 + 按群目录 `workspaces\<群标识>\`）、**④-c** = 按人 `NEED_GROUP`（判据从「全局 `group_chat_id` 空」改成「**该人无绑定**」）且**覆盖全部**依赖归属的私聊指令（不只 `我想提议：` 一条）、`state.group_chat_id` **停写 + 只读兼容**、进程根只留 `index.json` + `workspaces\`。**这笔同时落了 ④-a 与 ④-c 两个处置项，而提交信息只写了 ④-a** —— PM 2026-09-17 点出的**标注缺口**：后面 grep `21fd34a` 的人必须知道 ④-c 也在这笔里，别做重复劳动。**复跑** = `python -m pytest -q --basetemp=<可写目录>` ⇒ **456 passed**（`--basetemp` 是沙箱 / ACL 坑：默认 `%TEMP%\pytest-of-<用户>` 会 `PermissionError` 一片假红，**不是代码问题**）。**真机三槽仍待跑**（§7.4 / `docs\ACCEPTANCE-U2.md`） |
+| **U2 落地（v1.27，2026-09-17）** | **已落地，一笔 = `21fd34a`**：两段式工作空间（`index.json` + `user_last_group` 单值映射 + 按群目录 `workspaces\<群标识>\`）、**④-c** = 按人 `NEED_GROUP`（判据从「全局 `group_chat_id` 空」改成「**该人无绑定**」）且**覆盖全部**依赖归属的私聊指令（不只 `我想提议：` 一条）、`state.group_chat_id` **停写 + 只读兼容**、进程根只留 `index.json` + `workspaces\`。**这笔同时落了 ④-a 与 ④-c 两个处置项，而提交信息只写了 ④-a** —— PM 2026-09-17 点出的**标注缺口**：后面 grep `21fd34a` 的人必须知道 ④-c 也在这笔里，别做重复劳动。**复跑** = `python -m pytest -q --basetemp=<可写目录>` ⇒ **456 passed**（`--basetemp` 是沙箱 / ACL 坑：默认 `%TEMP%\pytest-of-<用户>` 会 `PermissionError` 一片假红，**不是代码问题**）。**真机三槽已跑**（`86055e2` / `docs\evidence\2026-09-17-u2-acceptance.md`，2026-09-16 20:04–20:18）⇒ §7.4 与 `docs\ACCEPTANCE-U2.md` 已勾；**遗留** = §5 的 T05 格、§2 的按人补测 |
 | **U4 兜底（时间不够按这条砍）** | 只保**换人**一种变更类型（退出 / 加入顺延 P1）；台账与群公示仍留 —— 与 `requirements-upgrade.md` §5 的"9/18 只保换人"同一口径 |
 | **U4 回归项（v1.8）** | 结算改走 `mutate_many()` **条件写**（只改空负责人 / 只新增卡），`_save_assignments()` 的**整份覆盖列为待改点**（§8.2）；回归 = **改派后重跑结算不丢人工修订** |
 | **U2 追加（v1.19，PM 2026-09-16 裁）** | 回退锁守卫：`rollback()` 补 `check_process_lock()`（与 `migrate()` 同口径，约 5 行）⇒ 进程在跑时 `--rollback` **同款拒绝 `exit=4`**（`EXIT_LOCKED`）。**回归**：进程在跑时跑 `--rollback` ⇒ `exit=4` 且**不动盘**（与迁移那条同款单测）。**落地前现状 = 回退不查锁** —— 手册 `docs\OPERATIONS-U2.md` §1 / §7 / §8 按现状写，落地后同步改口。**不加干跑档**：PM 裁定「假跑不解决敲错，锁守卫解决真事故」 |
@@ -709,7 +709,7 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 - [x] **回退锁守卫 —— 已落地（v1.26，`18820b7`）**：`tools\migrate_workspace.py` 的 `check_process_lock()` 现在 `migrate()` 与 `rollback()` **都调** ⇒ 进程在跑时回退**拒绝执行（`exit=4`）且不动盘**；回归 = `tests\test_migrate_workspace.py::test_rollback_refuses_while_the_upgrade_process_is_running`。手册 `docs\OPERATIONS-U2.md` §1 / §7 / §8 已同步改口。
 - [x] **`方向` 开窗成员判据 —— 已落地（v1.26，`aa742c0`）**：判点 = `vote.command()` 的 `known` 段（`roster` 为空 ⇒ 谁都算数），非成员 ⇒ `replies.DIRECTION_NOT_MEMBER`、**不开窗**；测试 3 条 = `test_a_stranger_cannot_open_the_window` / `test_a_stranger_cannot_touch_a_running_window` / `test_a_stranger_in_private_learns_they_are_not_on_the_roster`。
 
-- [x] **U2 落地（v1.27，`21fd34a`，④-a + ④-c 同一笔）**：`src/storage.py`（`INDEX` / `WORKSPACES` / `safe_key()` / `workspace_dir()` / `JsonStore.ensure_root_dirs()`）+ 新增 `src/gateway/workspace.py`（归属唯一实现）+ `app.py` 的 `handle()` 选数据域 + `router._proposal()` 收 `group_chat_id` + `tools/migrate_workspace.py` 的 `safe_key` 改同源。复跑 = `python -m pytest -q --basetemp=<可写目录>` ⇒ **456 passed**（上一笔 446，净增 10 = 新文件 `tests/test_workspace.py` **6** + `tests/test_gateway_app.py` **净增 4**，其中 2 处是改名）；`tests/test_migrate_workspace.py` 现集到 **18** 条（v1.12 的 17 + 回退锁守卫 1）。**单测层已过；真机三槽未跑**（§7.4 / `docs\ACCEPTANCE-U2.md` 不勾）。
+- [x] **U2 落地（v1.27，`21fd34a`，④-a + ④-c 同一笔）**：`src/storage.py`（`INDEX` / `WORKSPACES` / `safe_key()` / `workspace_dir()` / `JsonStore.ensure_root_dirs()`）+ 新增 `src/gateway/workspace.py`（归属唯一实现）+ `app.py` 的 `handle()` 选数据域 + `router._proposal()` 收 `group_chat_id` + `tools/migrate_workspace.py` 的 `safe_key` 改同源。复跑 = `python -m pytest -q --basetemp=<可写目录>` ⇒ **456 passed**（上一笔 446，净增 10 = 新文件 `tests/test_workspace.py` **6** + `tests/test_gateway_app.py` **净增 4**，其中 2 处是改名）；`tests/test_migrate_workspace.py` 现集到 **18** 条（v1.12 的 17 + 回退锁守卫 1）。**单测 + 真机都已过**：`docs\ACCEPTANCE-U2.md` §1–§5 一轮全过（`86055e2` / `docs\evidence\2026-09-17-u2-acceptance.md`）—— 遗留 = §5 的 T05 格未测、§2 只跑了 2 条指令（按人补测）。
 
 ---
 
@@ -748,11 +748,12 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 | 只读计数工具 `tools\count_replies.py`（v1.13） | 架构师 | **已交付（2026-09-16）**：纯 AST、不进运行时；§11.1 的复跑口径落在它上面（复跑 = `all 78 / text 73 / sym 5 / lines 326`） |
 | 手册 `docs\OPERATIONS-U2.md`（v1.13） | 架构师 | **已交付（2026-09-16）**；验收口径已按 §12.4 复跑一次（见本表「架构师复核」行） |
 | 9/18 彩排清单 `docs\REHEARSAL-0918.md`（v1.15） | 架构师 | **已交付（2026-09-16）**：只做**不依赖 U2 / U4** 的部分（§4.6 三格 + §9.1 的 18 条话术样例，实做 10 条）+ 依赖项留「待落定」槽位；**动 `data-upgrade\` 之前必须跑完**（理由写在清单头部）—— 待跑，结论回填 §4.6 / §9.3 |
-| U2 验收清单 `docs\ACCEPTANCE-U2.md`（v1.16） | 架构师 | **已交付（2026-09-16）**：§7.4 三条证据槽（双群绑定 / 未绑定 `NEED_GROUP` / 并发后到者胜出）+ 对齐卡 #5（`storage` 无变化不写盘）/ #7（投票块缺 `chat_id` 不豁免）两条回归；**排在 9/18 彩排之后、U2 落地之后跑** —— 待跑 |
+| U2 验收清单 `docs\ACCEPTANCE-U2.md`（v1.16） | 架构师 | **已跑（`86055e2`，2026-09-16 20:04–20:18）**：§1–§5 一轮全过 —— 证据 `docs\evidence\2026-09-17-u2-acceptance.md`；遗留见证据 §7 |
 | 回退锁守卫（v1.19，PM 裁） | 开发 | **已落地（v1.26，`18820b7`）**：`rollback()` 已调 `check_process_lock()`（与 `migrate()` 同口径）+ 回归 1 条；手册 §1 / §7 / §8 已改口 |
 | D-45 ① 子格：图不挤掉 PDF（v1.19） | 开发 | **已实测（2026-09-16 12:18–12:19，run3）**：PDF → 图 → `@作业书`，评分点来自**那份 PDF**、`uploads\` 只有 PDF（sha256 `83E749CF…`）；证据 `docs\evidence\2026-09-16-u2-preflight-penetration.md` §7。§4.6 子格条已同步翻实测。**凭证口径（审核员 2026-09-16 点）**：必须**反向**（先投 PDF → 再发图 → PDF 还在）；「`state.json` 无 `pending_file` 键」**只证主格**，不许拿来当子格凭证 |
-| U2 落地（v1.27，2026-09-17） | 开发 | **已落地，一笔 = `21fd34a`（④-a + ④-c 同一笔；提交信息只写了 ④-a ⇒ PM 2026-09-17 记为「标注缺口」）**：**④-a** 两段式工作空间 + **④-c** 按人 `NEED_GROUP`（判据 = 「该人无绑定」，覆盖全部依赖归属的私聊指令）+ `state.group_chat_id` 停写 + 进程根只留 `index.json` + `workspaces\`；`pytest` **456 passed**（复跑命令与 `--basetemp` 环境坑见 §12.4 / §12.5）。**真机三槽未跑** ⇒ §7.4 与 `docs\ACCEPTANCE-U2.md` 不勾 |
-| §3.5 / §7.2 / §7.4 / §12 的 U2 回填（v1.27） | 架构师 | **已回填（2026-09-17）**：§3.5（`group_chat_id` 停写 + 只读）、§7.2（归属唯一实现 + 调用点）、§7.4（三槽拆「单测已过 / 真机未跑」两层）、§12.4 / §12.5（落地登记）；`docs\ACCEPTANCE-U2.md` 头部与 §4 / §5 同步。**真机三槽仍未跑，不许当通过** |
+| U2 落地（v1.27，2026-09-17） | 开发 | **已落地，一笔 = `21fd34a`（④-a + ④-c 同一笔；提交信息只写了 ④-a ⇒ PM 2026-09-17 记为「标注缺口」）**：**④-a** 两段式工作空间 + **④-c** 按人 `NEED_GROUP`（判据 = 「该人无绑定」，覆盖全部依赖归属的私聊指令）+ `state.group_chat_id` 停写 + 进程根只留 `index.json` + `workspaces\`；`pytest` **456 passed**（复跑命令与 `--basetemp` 环境坑见 §12.4 / §12.5）。**真机三槽已跑**（`86055e2` / `docs\evidence\2026-09-17-u2-acceptance.md`）⇒ §7.4 与 `docs\ACCEPTANCE-U2.md` 已勾 |
+| §3.5 / §7.2 / §7.4 / §12 的 U2 回填（v1.27） | 架构师 | **已回填（2026-09-17）**：§3.5（`group_chat_id` 停写 + 只读）、§7.2（归属唯一实现 + 调用点）、§7.4（三槽拆「单测已过 / 真机未跑」两层）、§12.4 / §12.5（落地登记）；`docs\ACCEPTANCE-U2.md` 头部与 §4 / §5 同步。**v1.29 起这四节已按真机验收再订正一遍**（§7.4 三槽翻 `[x]`）；**仍未验的见 v1.29 ⑥** |
+| 文案台账：@ 门禁同族缺陷（v1.29） | 架构师（登记）/ 开发（实修） | **已登记（2026-09-17，来源 = 真机验收 `docs\evidence\2026-09-17-u2-acceptance.md` §8.1）**：群里「教用户回某个词」的话**必须自带 @我**，否则被自己的 @ 门禁吃掉（真机复现）。**已修 4 处（U1）** = `command_list` 第 1 条 + `file_missing()` / `parse_failed()` / `needs_rubric()`。**同族未修 8 处**（符号锚；行号按本材料纪律不写，见证据 §8.1）：`VOTE_NEED_ROSTER` / `DIRECTION_NOT_MEMBER` / `COMPLETE_NEED_ASSIGNMENTS` / `REPORT_NEED_ROSTER` / `REPORT_NEED_ASSIGNMENTS` / `PREFERENCE_NEED_ROSTER` / `PREFERENCE_NOT_MEMBER` / `PROPOSAL_NOT_MEMBER`；另有 `command_list(GROUP)` 的**第 2–7 条**（`group_line` 只有「作业书」一条带 @）。**修法** = 照 `file_missing()` 的 scope 分叉。**处置（PM 2026-09-16）：先不改、先记台账** —— 与 U3 / U4 的文案一次收（现在改会牵动 §11 对照表 + 计数快照 + 再复跑一轮）。**同证据 §8.2 的反例**：`NEED_GROUP` **不在清单里、别顺手改** —— 它教「先在群里发一次指令」，而绑定刷新在门禁**之前**（对齐卡 #3）⇒ 静默发也照样认下这个群 |
 ## 14. 送审与判定
 
 1. 材料填完 → 我按 §0 + `requirements-upgrade.md` §8 的 12 条逐项审。
@@ -937,3 +938,11 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 >   - ① **PM 2026-09-17 给出编号定义**：**④-a** = 两段式工作空间（按群目录 + `index.json` + `user_last_group` 单值映射）；**④-1** = 拆 `exempt()` / `accept()` 两处 `or state.get("group_chat_id")` 回退（`ceaf62a`）；**④-c** = `NEED_GROUP` 判据从「全局 `group_chat_id` 空」改成「**该人无绑定**」，且覆盖**所有**依赖归属的私聊指令（不只 `我想提议：` 一条）。
 >   - ② **落点补口径**：§7.4 槽 ② 标 `= U2 **④-c**`；§12.4 表后加「U2 处置项编号口径」段；§12.4 行内与 §13 行分别点明 ④-a / ④-c；变更记录 ① 同步。
 >   - ③ **v1.27 里那一笔的归属**：**④-a 与 ④-c 同笔 = `21fd34a`**（提交信息只写了 ④-a）—— 本轮只是把**编号**点明，**没有新增落地项**；§3.5 的 `state.group_chat_id` 停写**不等于 ④-c**，别混。
+> - 2026-09-17 **v1.29（U2 真机验收回填 + 手册补一句 + 8 处文案台账）**：
+>   - ① **`docs\ACCEPTANCE-U2.md` 状态行按真机结果订正**：§1–§5 **全过**（证据 = `docs\evidence\2026-09-17-u2-acceptance.md`，提交 `86055e2`；被测提交 `21fd34a`）—— 头部「真机槽仍未跑」→「已跑」，§4 / §5「手工步未跑」→「已跑」，§6 收工勾 4 条；另按证据 §8.3 在 §1 步骤前补**一行前置**（缺 `cards` / `roster` 就拿不到来源标题）。
+>   - ② **§7.4 三条槽 `[ ] → [x]`（实测）**：① 双群绑定（§1）② 按人 `NEED_GROUP`（§2，= U2 ④-c）③ 并发后到者胜出（§3）。
+>   - ③ **§3.5 的并发那条**只加「**部分覆盖**」指针（真机验收 §3 = 两群交替写 `index.json`；**同毫秒级真并发仍未验**）—— 格子**仍是 `[ ]`**，没翻通过。
+>   - ④ **`docs\OPERATIONS-U2.md` §7 补一句**：④-a 之后**运行时只读** `data-upgrade\index.json` 与 `workspaces\<群 chat_id>\`；顶层扁平残留（含 `_rehearsal\`）是**迁移前快照**、运行时不读、**别手工删**（PM 2026-09-16 裁：不另加「就地收编」命令）。
+>   - ⑤ **§13 落 8 处文案台账行**（含 `NEED_GROUP` **不在清单里**的注解）。
+>   - ⑦ **顺手清掉两处 v1.27 自相矛盾的表述**：§12.4 的「真机三槽仍待跑」与 §13 回填行的「真机三槽仍未跑，不许当通过」—— 都改成「已按真机验收订正」；**v1.27 的变更记录原文不动**（那是当时的事实）。
+>   - ⑥ **仍未验**：§5 的 **T05 格**（窗关后裸数字应静默 ⇒ 归 `docs\REHEARSAL-0918.md` 格 B4）、§2 的**按人补测**（`报告` / `完成 T3` / `我想提议：`）、§3.5 的**真并发 / 迁移中断 / 磁盘**三项、§12.5 的回归执行记录表。
