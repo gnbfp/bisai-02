@@ -242,12 +242,12 @@ uploads/过年不放炮的软工导论课程报告.pdf 3DC0D8D780D29977665B71F7D
 ## 7. 未覆盖 / 遗留（下一轮别漏）
 
 1. **§5 的 T05 格没测**（窗关后再发裸数字应静默；本轮没发）⇒ 归 `docs\REHEARSAL-0918.md` 格 B4。
-2. **§2 只覆盖了 2 条私聊归属指令**（`你想做哪一块`、`作业书`）—— `报告`/`完成 T3`/`我想提议：` 等**没逐条**跑（`报告` 还只认组长、只认群里）。⇒ ④-c 落地后按人各跑一条。
+2. **§2 只覆盖了 2 条私聊归属指令**（`你想做哪一块`、`作业书`）—— `报告`/`完成 T3`/`我想提议：` 等**没逐条**跑（`报告` 还只认组长、只认群里）。⇒ 判据本身**已在 `21fd34a`**（PM 2026-09-16 确认：④-c 就落在 `app.py` 的 `handle()` —— 选不到数据域即回 `NEED_GROUP`，本轮 §2 那两条 `none 没有绑定` 就是它）⇒ **不需要再排一遍代码**，剩下的只是**按人补测**（`报告` 只认组长且只认群里，得单独安排）。
 3. **非成员裸数字**（run5 验过）本轮没重跑 —— 3 人花名册下门槛 2 票，非成员那条得另开一轮窗、且顺序必须「非成员先发 ⇒ 成员后发」。
-4. `data-upgrade\` **顶层扁平残留**（含 `_rehearsal\`）现在是**死数据**：运行时一个字不读，但工具**没有**「把升级版自己的扁平数据就地收编进工作空间」的路径（`migrate_workspace.py` 只支持 `data\` → dest）。⇒ 这批彩排数据要么弃用重建，要么由架构师另定一条命令。本轮按纪律**一个字节没动**；清理按 `docs\OPERATIONS-U2.md` §7 需另行授权。
+4. `data-upgrade\` **顶层扁平残留**（含 `_rehearsal\`）现在是**死数据**：运行时一个字不读，但工具**没有**「把升级版自己的扁平数据就地收编进工作空间」的路径（`migrate_workspace.py` 只支持 `data\` → dest）。**PM 2026-09-16 裁决：不另加「就地收编」命令**（要动 `migrate_workspace.py` 的语义 + 补回归，不值），口径改为一句话写进文档 —— **进程根运行时只读 `index.json` / `workspaces\`，顶层是迁移前快照**。本轮按纪律**一个字节没动**；清理按 `docs\OPERATIONS-U2.md` §7 需另行授权。
 
 ## 8. 本轮捞出来的新问题（给架构师 / 补丁批）
 
-1. **文案同族缺陷（真机复现）**：群里「教用户回某个词」的话必须自带 @我，否则被自己的门禁吃掉。已修的是 U1 那 4 处（`replies.py` 的 `command_list` 第 1 条 + `file_missing()/parse_failed()/needs_rubric()`）。**同族还没修**：`VOTE_NEED_ROSTER:208`、`DIRECTION_NOT_MEMBER:210`、`COMPLETE_NEED_ASSIGNMENTS:246`、`REPORT_NEED_ROSTER:268`、`REPORT_NEED_ASSIGNMENTS:270`、`PREFERENCE_NEED_ROSTER:283`、`PREFERENCE_NOT_MEMBER:284`、`PROPOSAL_NOT_MEMBER:303`，以及 `command_list(GROUP)` 第 2–7 行（`group_line` 只有「作业书」一条有）。修法照 `file_missing()` 的 scope 分叉。
+1. **文案同族缺陷（真机复现）**：群里「教用户回某个词」的话必须自带 @我，否则被自己的门禁吃掉。已修的是 U1 那 4 处（`replies.py` 的 `command_list` 第 1 条 + `file_missing()/parse_failed()/needs_rubric()`）。**同族还没修**：`VOTE_NEED_ROSTER:208`、`DIRECTION_NOT_MEMBER:210`、`COMPLETE_NEED_ASSIGNMENTS:246`、`REPORT_NEED_ROSTER:268`、`REPORT_NEED_ASSIGNMENTS:270`、`PREFERENCE_NEED_ROSTER:283`、`PREFERENCE_NOT_MEMBER:284`、`PROPOSAL_NOT_MEMBER:303`，以及 `command_list(GROUP)` 第 2–7 行（`group_line` 只有「作业书」一条有）。修法照 `file_missing()` 的 scope 分叉。**处置（PM 2026-09-16）：先不改、先记台账** —— 与 U3/U4 的文案一次收（现在改会牵动 §11 对照表 + 计数快照 + 再复跑一轮）；本条即台账入口。
 2. **`NEED_GROUP:297` 不算缺陷，别顺手改**：它教「先在群里发一次指令」，而绑定刷新在门禁**之前**（对齐卡 #3）⇒ 静默发也照样认下这个群。
 3. **§1 的隐性前置**：`你想做哪一块` 私聊需要 `cards` + `roster` **两样都有**，缺任一个都拿不到来源标题（`preference.py:87`）。`ACCEPTANCE-U2.md` §1 的步骤里没写「先登记」，下一版清单补一句，省得下一轮又卡在同一个地方。
