@@ -24,13 +24,13 @@
 
 > **改名本轮不做（P2 开关）** —— 可读名要改就手工编辑 `index.json` 的 `name`（口径见 §2.3 / §5），或等 P2 开关开。
 
-> **⚠️ 口径时效（v1.19）**：本手册 §1 / §7 / §8 写着「回退没有工具守卫」—— 那是**当日现状**。PM 2026-09-16 已裁「给 `rollback()` 补同款锁守卫 + 回归（进程在跑 ⇒ `exit=4`）」，排 U2；**守卫落地后本手册这三处必须改口**，别照旧文说「回退没有守卫」。
+> **✅ 口径已改口（v1.26）**：原先 §1 / §7 / §8 写的「回退没有工具守卫」**已失效** —— `rollback()` 已补 `check_process_lock()`（`18820b7`，与 `migrate()` 同口径）：**进程在跑时回退会被拒（`exit=4`）且不动盘**（回归 = `tests\test_migrate_workspace.py::test_rollback_refuses_while_the_upgrade_process_is_running`）。下面那三处已同步改成「**迁移与回退都有守卫**」。
 
 ---
 
 ## 1. 动手前的四条前置检查（一条不满足就别动手）
 
-1. **进程已停** —— 迁移前必须停升级版（`docs\ARCHITECTURE-UPGRADE.md` §3.3 第 1 步）。锁在进程根：`data-upgrade\app.lock`（`src/gateway/app.py` 的 `LOCK_FILE` = `tools\migrate_workspace.py` 的 `LOCK_NAME`）。**⚠️ 这道守卫只装在迁移上**：`check_process_lock()` 只在 `migrate()` 里调用 —— 进程还在跑时**默认拒绝**（`--force` 只跳过阻断、不代表进程真停了）；**回退（清空 / 重置）走 `rollback()`，它压根不查锁**。也就是说**最容易出事的动作没有工具守卫**，只能靠本节 + §4 的复核人守住。
+1. **进程已停** —— 迁移与回退**都要先停升级版**（`docs\ARCHITECTURE-UPGRADE.md` §3.3 第 1 步）。锁在进程根：`data-upgrade\app.lock`（`src/gateway/app.py` 的 `LOCK_FILE` = `tools\migrate_workspace.py` 的 `LOCK_NAME`）。**✅ 两条路都有守卫（v1.26 改口）**：`check_process_lock()` 现在 `migrate()` 与 `rollback()` **都调**（`18820b7`）—— 进程还在跑时**默认拒绝**（回退同款 `exit=4`、且不动盘）；`--force` 只跳过阻断、**不代表进程真停了**。守卫管的是「进程在跑」这一件事，**省不掉 §4 的复核人**。
 2. **路径解析过** —— 目标必须**严格落在** `data-upgrade\` 之内（不等于根、不在根之外）。工具用 `resolve_path()` + `guard_within()` 做这件事，不合格直接抛 `OutOfScope` 中止。**人工改 JSON 时同样按这条自查**。
 3. **备份在** —— 真跑会先备份到 `data-upgrade\_migration\<stamp>\`；同一份源数据只留一份备份（`SOURCE.sha256` 认领，重跑复用，不堆垃圾）。
 4. **先写台账** —— 动手**之前**先往 `maintenance.log` 追加一行（§3）。顺序反了就等于"没有记录"。
@@ -49,7 +49,7 @@
 python tools\migrate_workspace.py --rollback --chat-id oc_xxxxxxxxxxxxxxxx
 ```
 
-**⚠️ 回退没有干跑档（v1.18 订正，原先写成「干跑」是错的）**：`--rollback` **不吃 `--apply`** —— `main()` 里 `if args.rollback:` 直接调 `rollback()`，敲下去就是**真删**（副本 + 索引条目一起没）。所以动手**之前**必须三件事齐：① 进程已停（§1 第 1 条 —— 这一条**没有工具守卫**，只能靠人）；② 台账先写（§3）；③ 复核人点头（§4）。**没有「先看一眼」的机会**，别把它当成可以随手试的命令。 **（PM 2026-09-16 裁：不加干跑档 —— 假跑不解决「敲错」，锁守卫解决「进程还在跑就删盘」这种真事故。）**
+**⚠️ 回退没有干跑档（v1.18 订正，原先写成「干跑」是错的）**：`--rollback` **不吃 `--apply`** —— `main()` 里 `if args.rollback:` 直接调 `rollback()`，敲下去就是**真删**（副本 + 索引条目一起没）。所以动手**之前**必须三件事齐：① 进程已停（§1 第 1 条 —— 回退**也有守卫**：进程在跑会被 `exit=4` 直接拒）；② 台账先写（§3）；③ 复核人点头（§4）。**没有「先看一眼」的机会**，别把它当成可以随手试的命令。 **（PM 2026-09-16 裁：不加干跑档 —— 假跑不解决「敲错」，锁守卫解决「进程还在跑就删盘」这种真事故。）**
 
 `--chat-id` 缺省时，工具从 `data\state.json` 的 `group_chat_id` 或索引里推；**推不出来就停手问人**（归属不明不猜）。
 
@@ -179,7 +179,7 @@ python tools\migrate_workspace.py --dest-root data-upgrade\_rehearsal --rollback
 - ❌ **不许删 / 改 `data\`**（MVP 真源；工具纪律第 1 条：只复制、不移动）。
 - ❌ **不许把 `data-upgrade\` 整根清空**（那会连 `maintenance.log` 一起删掉 —— 记录和动作一起消失）。要整根清空**必须另行授权**（§3.2 的约束，PM 2026-09-16）。
 - ❌ **不许用 `--force` 掩盖"进程还在跑"** —— 它只是跳过阻断；并发写 `index.json` 会把改名 / 绑定冲掉。
-- ⚠️ **回退（清空 / 重置）没有进程锁守卫**（`rollback()` 不调 `check_process_lock()`）—— 进程在跑时它**不会拒绝**，照删不误；这一条只能靠 §1 第 1 条 + §4 的复核人守住。
+- ✅ **回退（清空 / 重置）也有进程锁守卫了（v1.26 改口）**：`rollback()` 已补 `check_process_lock()`（`18820b7`）—— 进程在跑时**拒绝执行**（`exit=4`、不动盘）。但 `--force` 仍能跳过 ⇒ **§4 的复核人不能省**。
 - ❌ **不许把机器绝对路径写进 `index.json`**（§5）。
 - ❌ **不许只写 `operator` 不写 `verifier`**（等于没做二次确认）。
 - ⚠️ **手工编辑 JSON 前先停进程**（2.3）。
@@ -194,4 +194,4 @@ python tools\migrate_workspace.py --dest-root data-upgrade\_rehearsal --rollback
 - [ ] 有 `MANIFEST`（`MANIFEST-migrate-*.json` 或回退的 `MANIFEST-rollback-*.json`）
 - [ ] 需要时跑过 §6 的四步演练，四条判据全过
 - [ ] `index.json` 里没有绝对路径
-- [ ] **回退类动作（清空 / 重置）动手前：进程已停 + 复核人在场**（回退没有工具守卫，见 §1 / §7）
+- [ ] **回退类动作（清空 / 重置）动手前：进程已停 + 复核人在场**（回退**有**工具守卫、会拒在跑的进程 —— 但 `--force` 能跳过，见 §1 / §7）

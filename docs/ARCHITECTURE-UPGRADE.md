@@ -284,7 +284,7 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 |---|---|---|---|---|---|
 | 1 | `作业书` | 群 + 私聊 | `state.pending_file` 有效（同会话、30 分钟内） | M1 → M3 → 三份产物一起落盘 | 现状不变（但门禁 + 文件静默缓存变了，见 §4） |
 | 2 | `拆解` | 群 + 私聊 | 有评分点 | 重跑 M3 + 覆盖 `cards.json` | 现状不变 |
-| 3 | `方向` | **群** | 有评分点 + 有花名册（**v1.24 起再加：发信人必须是花名册成员** —— 已裁、待落地） | 起 M2 → 开投票窗口 | 现状不变（**加成员判据：已裁、待落地**，见 §12.4） |
+| 3 | `方向` | **群** | 有评分点 + 有花名册（**发信人必须是花名册成员** —— **已落地 `aa742c0`**；判点在 `vote.command()` 的 `known` 那段，`roster` 为空 ⇒ 谁都算数） | 起 M2 → 开投票窗口 | **已落地（`aa742c0`）**：非成员 ⇒ 回 `DIRECTION_NOT_MEMBER`、**不开窗**；测试 3 条（见 §12.5） |
 | 4 | `你想做哪一块` | **群**（开窗）/ 私聊（填志愿） | 有卡 + 有花名册 | 开志愿窗口 / 收志愿 | 现状不变 |
 | 5 | `我想提议：` | **私聊** | 是花名册成员 | 匿名转达 + `proposals.json` 留痕 | 现状不变 |
 | 6 | `完成 T3` | **私聊** | 有分配 | 标记 `completed_at`（幂等） | 现状不变 |
@@ -684,7 +684,7 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 | **U4 兜底（时间不够按这条砍）** | 只保**换人**一种变更类型（退出 / 加入顺延 P1）；台账与群公示仍留 —— 与 `requirements-upgrade.md` §5 的"9/18 只保换人"同一口径 |
 | **U4 回归项（v1.8）** | 结算改走 `mutate_many()` **条件写**（只改空负责人 / 只新增卡），`_save_assignments()` 的**整份覆盖列为待改点**（§8.2）；回归 = **改派后重跑结算不丢人工修订** |
 | **U2 追加（v1.19，PM 2026-09-16 裁）** | 回退锁守卫：`rollback()` 补 `check_process_lock()`（与 `migrate()` 同口径，约 5 行）⇒ 进程在跑时 `--rollback` **同款拒绝 `exit=4`**（`EXIT_LOCKED`）。**回归**：进程在跑时跑 `--rollback` ⇒ `exit=4` 且**不动盘**（与迁移那条同款单测）。**落地前现状 = 回退不查锁** —— 手册 `docs\OPERATIONS-U2.md` §1 / §7 / §8 按现状写，落地后同步改口。**不加干跑档**：PM 裁定「假跑不解决敲错，锁守卫解决真事故」 |
-| **U1 门禁线收尾（v1.24；口径由架构师定，PM 2026-09-16 授权）** | `方向` 开窗入口加**花名册成员判据** —— 判点 = `roster.members` 的 open_id 集合，与 `router._proposal()` 同款；`roster` 为空（还没登记）⇒ 谁都算数，沿用 `_proposal()` 的兜底口径。**理由**：`我想提议：` 查名册、`方向` 不查 ⇒ 同一条「群内发起」能力两种口径；run5 已实测**外人**（`ou_a7986…`，不在花名册）一句 `@机器人 方向` 就开了全组投票窗（`19:26:52` 开窗、`19:26:56` 出候选），而窗里只有成员能投票。**回归**：非成员发 `方向` ⇒ **不开窗**（回新文案 `DIRECTION_NOT_MEMBER`）+ `awaiting` 不动；成员 / 组长 ⇒ 照常开窗。**演示安全**：§10.1 第 5 步的发信人本来就是**组长**，而 `register._confirm()` 硬约束 `leader ∈ members` ⇒ **不会卡演示**。**排 9/17 补丁批**（不挂 U2 —— U2 是数据层）。**话术**：新增 `DIRECTION_NOT_MEMBER` ⇒ §11 交付物①的对照表加一行（数字口径已是「复跑命令 + 输出」，材料里的数不用改） |
+| **U1 门禁线收尾（v1.24；口径由架构师定，PM 2026-09-16 授权）—— 已落地（v1.26，`aa742c0`）** | `方向` 开窗入口加**花名册成员判据**：判点 = `vote.command()` 的 `known` 段（`roster.members` 的 open_id 集合），非成员 ⇒ 回 `replies.DIRECTION_NOT_MEMBER`、**不开窗**；`roster` 为空 ⇒ 谁都算数（沿用 `_proposal()` 的兜底）。**理由**：`我想提议：` 查名册、`方向` 不查 ⇒ 同一条「群内发起」能力两种口径；run5 实测过**外人开全组投票窗**。**回归（已过）**：`test_a_stranger_cannot_open_the_window` / `test_a_stranger_cannot_touch_a_running_window` / `test_a_stranger_in_private_learns_they_are_not_on_the_roster`。**演示不受影响**：§10.1 第 5 步由**组长**发，而 `register._confirm()` 硬约束 `leader ∈ members`。**排期**：9/17 补丁批 ①（不挂 U2）。 |
 | 9/18 | 彩排（**含 §10.1 第 7 步 U6 拍板、第 13 步 U4 回流认领**）+ T01–T13 全量回归。**不依赖 U2 / U4 的那部分已拆成清单** `docs\REHEARSAL-0918.md`（§4.6 三格 + §9.1 的 18 条话术样例，本批实做 10 条），**依赖 U2 / U4 的留槽位标「待落定」**；本批**不碰 `data-upgrade\workspaces\`** |
 | 9/19 | 提交 |
 
@@ -697,8 +697,10 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 - [x] **单测已过（v1.9）**：净增 **36** 条（**分文件实测**，`3efe36f` → HEAD）—— `tests/test_gateway_router.py` **+13**（含 T05"投完立即恢复门禁"；其中 4 条钉的是资源分支、不是门禁穿透）、`tests/test_vote.py` **+12**（U6）、`tests/test_gateway_events.py` **+4**（@ 识别）、`tests/test_replies.py` **+7**（话术与清单派生的机械判据）⇒ §4.6 / §9.3 / §11.5 的对应项降级为"**单测已过、真机未测**"
 - [ ] **真机实测**（§4.6 的 ≥6 条穿透 + §9.3 的 18 条话术样例）—— **9/18 彩排**；单测替代不了"平台上 @ 到底长什么样"这条证据
 - [x] **穿透批整批闭环（v1.25）**：§4.6 全部格（含 ④ **非成员半格**）+ D-45 ① 子格全绿，run1–run5 五轮留痕 —— 证据 = `docs\evidence\2026-09-16-u2-preflight-penetration.md`（§3 逐条判定 + §2.1–§2.3 原样日志 + §7 子格 + §8 摘/还原哈希）。**仍未验的只剩**「`方向` 开窗成员判据」「回退锁守卫」「`ACCEPTANCE-U2` 全表」—— 三条都在等落地，不是缺证据。
-- [ ] **回退锁守卫（已裁、待落地；v1.19）**：`rollback()` 现在**不查锁**（`check_process_lock()` 只在 `migrate()` 内调用）—— 这是**当日现状**（代码事实）。PM 2026-09-16 裁「加同款守卫 + 回归：进程在跑时 `--rollback` ⇒ `exit=4` 且不动盘」，排 U2。**落地前不许写成「回退有守卫」。**
-- [ ] **`方向` 开窗的成员判据（v1.24，已裁、待落地）**：现状 `router._by_prefix()` 的 `方向` 分支**不查名册**（只查「有评分点 + 有花名册」）—— 这是**代码事实**；口径由架构师定（PM 2026-09-16 授权）⇒ 裁定**加**，排 9/17 补丁批。**落地前不许写成「开窗已校验成员」。**
+- [x] **存储条件写 —— 已落地（v1.26，`5dcb019`）**：`src\storage.py` 的 `mutate_raw()` / `mutate_many()` 走 `_write_if_changed_unlocked()`（锁内序列化比较：**新值 == 旧值 ⇒ 不写盘**；文件不存在、值仍是 `default` 时也不凭空造一份）。测试 3 条 = `test_mutate_writes_nothing_when_the_value_is_unchanged` / `test_mutate_does_not_materialize_a_missing_file_without_a_change` / `test_mutate_still_writes_when_the_value_changes`。回归动作见 `docs\ACCEPTANCE-U2.md` §4。
+- [x] **投票块缺 `chat_id` 不再回退全局单值 —— 已落地（v1.26，`ceaf62a`）**：`vote.exempt()` / `vote.accept()` 里那两处「拿全局单值顶替」的回退 已拆掉；测试 = `test_a_window_block_without_chat_id_neither_exempts_nor_counts`。回归动作见 `docs\ACCEPTANCE-U2.md` §5。
+- [x] **回退锁守卫 —— 已落地（v1.26，`18820b7`）**：`tools\migrate_workspace.py` 的 `check_process_lock()` 现在 `migrate()` 与 `rollback()` **都调** ⇒ 进程在跑时回退**拒绝执行（`exit=4`）且不动盘**；回归 = `tests\test_migrate_workspace.py::test_rollback_refuses_while_the_upgrade_process_is_running`。手册 `docs\OPERATIONS-U2.md` §1 / §7 / §8 已同步改口。
+- [x] **`方向` 开窗成员判据 —— 已落地（v1.26，`aa742c0`）**：判点 = `vote.command()` 的 `known` 段（`roster` 为空 ⇒ 谁都算数），非成员 ⇒ `replies.DIRECTION_NOT_MEMBER`、**不开窗**；测试 3 条 = `test_a_stranger_cannot_open_the_window` / `test_a_stranger_cannot_touch_a_running_window` / `test_a_stranger_in_private_learns_they_are_not_on_the_roster`。
 
 ---
 
@@ -730,13 +732,15 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 | 真机冒烟：U1 门禁 + `作业书` 两条链路（v1.11） | 开发 | **已跑（2026-09-16）**：6 条穿透（①②③④⑤⑥）+ 群 / 私聊两条 `作业书` 链路；`pytest` **421 passed**；原样日志与落盘见 `docs/evidence/2026-09-16-u1-smoke-real-device.md`。当时**未覆盖**：图片消息、投票窗那两格 —— **已由「U2 开工前穿透批」跑通**（证据 `docs\evidence\2026-09-16-u2-preflight-penetration.md`；口径见 §4.6）。**当时另缺的一格「非花名册账号」也已在 run5 补测通过**（`19:26–19:27`，同值对照）|
 | 归属注记（v1.10） | 架构师 | **`bed2574` 的代码由开发产出、架构师代提**（同一工作区，避免未提交状态阻塞复核）；`28f898d` 的文档面由架构师产出；两笔都已推 `bisai` |
 | 归属注记（`4ed71cb`） | 审核员（提交方）+ 开发（内容方） | **`4ed71cb` 由审核员提交**（自陈 `git add -u` 误暂存）：被一并暂存进去的 `docs\ACCEPTANCE-U2.md` §5「顺序纪律」段、`docs\evidence\2026-09-16-u2-preflight-penetration.md` 与 `docs\evidence\2026-09-16-v1.8-全量重判.md` 的改动**是开发产出的** —— 内容完整、**无丢失，只是归属错**。**不重写已推历史**（其后已压 `e02dd03` / `79d9649`；PM 2026-09-16 裁「只记归属」），补本行留痕。**审核侧已收紧**：一律 `git add -- <确切路径>`、暂存面不是 1 文件即硬失败、提交前重读 `status`（详见 `docs\evidence\2026-09-16-v1.8-全量重判.md` §8.11） |
-| `方向` 开窗成员判据（v1.24） | 开发 | **已裁、待落地**：判点 = `roster.members`（与 `_proposal()` 同款）+ 新文案 `DIRECTION_NOT_MEMBER`；回归 = 非成员 ⇒ 不开窗且 `awaiting` 不动；排 9/17 补丁批（§12.4） |
+| 存储条件写（v1.26） | 开发 | **已落地（v1.26，`5dcb019`）**：`mutate_raw()` / `mutate_many()` 条件写 + 测试 3 条；对齐卡 #5 的回归动作见 `docs\ACCEPTANCE-U2.md` §4 |
+| 投票块缺 `chat_id` 回退（v1.26） | 开发 | **已落地（v1.26，`ceaf62a`）**：`exempt()` / `accept()` 两处回退已拆 + 测试 1 条；对齐卡 #7 的回归动作见 `docs\ACCEPTANCE-U2.md` §5 |
+| `方向` 开窗成员判据（v1.24） | 开发 | **已落地（v1.26，`aa742c0`）**：判点 = `vote.command()` 的 `known` 段 + 新文案 `DIRECTION_NOT_MEMBER`；测试 3 条；§5.1 / §12.4 / §12.5 已同步 |
 | 架构师复核：补丁批前半（v1.13） | 架构师 | **已复核（2026-09-16）**：独立复跑 干跑 → 迁移 → 复跑 → 回退（落 `_rehearsal`）—— 首跑 `workspace_changes=17`、复跑 `workspace_changes=0` + `idempotent=True`、同秒两跑落 `MANIFEST-…-2.json`、回退 `[removed]` + 摘 3 条绑定；**MVP `data\` 21 个文件哈希前后一致**；`pytest` **438 passed**（新文件 **17** 条）⇒ 记录 `docs/evidence/2026-09-16-architect-countersign-v1.12.md` |
 | 只读计数工具 `tools\count_replies.py`（v1.13） | 架构师 | **已交付（2026-09-16）**：纯 AST、不进运行时；§11.1 的复跑口径落在它上面（复跑 = `all 78 / text 73 / sym 5 / lines 326`） |
 | 手册 `docs\OPERATIONS-U2.md`（v1.13） | 架构师 | **已交付（2026-09-16）**；验收口径已按 §12.4 复跑一次（见本表「架构师复核」行） |
 | 9/18 彩排清单 `docs\REHEARSAL-0918.md`（v1.15） | 架构师 | **已交付（2026-09-16）**：只做**不依赖 U2 / U4** 的部分（§4.6 三格 + §9.1 的 18 条话术样例，实做 10 条）+ 依赖项留「待落定」槽位；**动 `data-upgrade\` 之前必须跑完**（理由写在清单头部）—— 待跑，结论回填 §4.6 / §9.3 |
 | U2 验收清单 `docs\ACCEPTANCE-U2.md`（v1.16） | 架构师 | **已交付（2026-09-16）**：§7.4 三条证据槽（双群绑定 / 未绑定 `NEED_GROUP` / 并发后到者胜出）+ 对齐卡 #5（`storage` 无变化不写盘）/ #7（投票块缺 `chat_id` 不豁免）两条回归；**排在 9/18 彩排之后、U2 落地之后跑** —— 待跑 |
-| 回退锁守卫（v1.19，PM 裁） | 开发 | **已裁、待落地**：`rollback()` 补 `check_process_lock()` + 回归（进程在跑 ⇒ `exit=4`、不动盘）；排 U2（§12.4）。手册 §1 / §7 / §8 现按现状写「回退无守卫」，**落地后同步改口** |
+| 回退锁守卫（v1.19，PM 裁） | 开发 | **已落地（v1.26，`18820b7`）**：`rollback()` 已调 `check_process_lock()`（与 `migrate()` 同口径）+ 回归 1 条；手册 §1 / §7 / §8 已改口 |
 | D-45 ① 子格：图不挤掉 PDF（v1.19） | 开发 | **已实测（2026-09-16 12:18–12:19，run3）**：PDF → 图 → `@作业书`，评分点来自**那份 PDF**、`uploads\` 只有 PDF（sha256 `83E749CF…`）；证据 `docs\evidence\2026-09-16-u2-preflight-penetration.md` §7。§4.6 子格条已同步翻实测。**凭证口径（审核员 2026-09-16 点）**：必须**反向**（先投 PDF → 再发图 → PDF 还在）；「`state.json` 无 `pending_file` 键」**只证主格**，不许拿来当子格凭证 |
 ## 14. 送审与判定
 
@@ -904,3 +908,9 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 >   - ① §4.6 最后那格（**非花名册账号**群内裸数字 → 静默）**翻成实测**：run5 `19:26–19:27`，临时把发信人摘出花名册造非成员 —— 他发 `1` **静默不计票**，在册成员发同样的 `1` 计票并 `过半：1/1` 落定 ⇒ **同值对照**（同一个数字，两种身份两种结果），旁证 = `direction.json` 的 `votes` 只有成员那一票。证据 = `docs\evidence\2026-09-16-u2-preflight-penetration.md` §2.3 + §3 第 ④ 行。
 >   - ② §4.6 标题下加**闭环说明**：真机部分（矩阵全部格 + D-45 ① 子格）已有 run1–run5 五轮证据；本节剩的唯一 `[ ]` 是「真机构造不出来」的兜底判据。
 >   - ③ §13 的「另补一格非花名册账号未测」**同步订正**为已补测；§12.5 新增 `[x]` 记整批闭环，并点明**仍未验的只剩三条待落地项**（开窗成员判据 / 回退锁守卫 / `ACCEPTANCE-U2` 全表）。
+> - 2026-09-17 **v1.26（P0 手册改口 + 9/17 补丁批四笔落地回填）**：
+>   - ① **P0（文档曾是错的）**：`docs\OPERATIONS-U2.md` §1 / §7 / §8 原先写「回退没有工具守卫」—— `rollback()` 锁守卫已落地（`18820b7`）⇒ **三处按手册自己的「落地后必须改口」条款改口**，顶部时效注同步换成「✅ 已改口」。不改这处，下一个人会照假事实操作。
+>   - ② **`方向` 开窗成员判据已落地（`aa742c0`）**：§5.1 第 3 条 / §12.4 / §12.5 / §13 从「已裁待落地」翻**已落地**，判点 = `vote.command()` 的 `known` 段，非成员 ⇒ `DIRECTION_NOT_MEMBER`；测试 3 条。
+>   - ③ **回退锁守卫已落地（`18820b7`）**：§12.5 / §13 翻已落地，回归 = `tests\test_migrate_workspace.py::test_rollback_refuses_while_the_upgrade_process_is_running`。
+>   - ④ **存储条件写已落地（`5dcb019`）**、**投票块缺 `chat_id` 回退已拆（`ceaf62a`）**：各登记 §12.5 / §13，并在 `docs\ACCEPTANCE-U2.md` §4 / §5 的「为什么」里补上落地提交。
+>   - ⑤ **`_save_assignments()` 的整份覆盖仍是待改**（读代码确认 docstring 仍写「整份分配结果一次性覆盖」）—— U4 的前置，**本轮没动、也不许当已改**。

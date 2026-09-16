@@ -81,7 +81,7 @@
 
 ## 4. 回归（对齐卡 #5）：`storage` 不再「没变化也写盘」
 
-**为什么**：`mutate_raw()` / `mutate_many()` 原来是**无条件写盘**（fn 原样返回也会写）。U2 把它改成**锁内序列化比较：新值 == 旧值 ⇒ 不写盘**。
+**为什么**：`mutate_raw()` / `mutate_many()` 原来是**无条件写盘**（fn 原样返回也会写）。U2 把它改成**锁内序列化比较：新值 == 旧值 ⇒ 不写盘**（**已落地 `5dcb019`**：`src\storage.py` 的 `mutate_raw()` / `mutate_many()` 走 `_write_if_changed_unlocked()`）。
 
 **单测（主判据）**
 
@@ -104,7 +104,7 @@ Get-Item .\data-upgrade\index.json | Select-Object LastWriteTime
 
 ## 5. 回归（对齐卡 #7）：投票块缺 `chat_id` ⇒ 不豁免、不算票
 
-**为什么**：`exempt()` / `accept()` 里的 `or state.get("group_chat_id")` 回退已拆掉 —— 留着等于让全局单值继续对投票生效。
+**为什么**：`exempt()` / `accept()` 里的 `or state.get("group_chat_id")` 回退已拆掉（**已落地 `ceaf62a`**，测试 = `test_a_window_block_without_chat_id_neither_exempts_nor_counts`）—— 留着等于让全局单值继续对投票生效。
 
 **单测（主判据）**
 
