@@ -39,7 +39,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import shutil
 import sys
 from dataclasses import dataclass
@@ -56,6 +55,7 @@ from src.storage import (  # noqa: E402
     ASSIGNMENTS,
     CARDS,
     DIRECTION,
+    INDEX,
     GANTT,
     MEMBERS,
     PREFERENCES,
@@ -66,7 +66,9 @@ from src.storage import (  # noqa: E402
     SEEN,
     STATE,
     UPLOADS,
+    WORKSPACES as WORKSPACES_DIR,
     JsonStore,
+    safe_key as storage_safe_key,
 )
 
 __all__ = [
@@ -95,8 +97,6 @@ TOOL_VERSION = "1.0"
 
 DEFAULT_SOURCE = "data"
 DEFAULT_DEST = "data-upgrade"
-INDEX = "index.json"
-WORKSPACES_DIR = "workspaces"
 MIGRATION_DIR = "_migration"
 BACKUP_MARKER = "SOURCE.sha256"
 LOCK_NAME = "app.lock"
@@ -146,14 +146,16 @@ class VerifyFailed(GuardError):
     """迁移后校验不一致（哈希 / 读数 / 覆盖率）。"""
 
 
-_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-
-
 def safe_key(key: str) -> str:
-    """群标识一类的路径段守卫：不许出现分隔符、点段、空串。"""
-    if not _KEY_RE.match(str(key or "")):
-        raise GuardError(f"非法路径段 {key!r}：只允许 [A-Za-z0-9_-]（防目录穿越）")
-    return str(key)
+    """群标识一类的路径段守卫：不许出现分隔符、点段、空串。
+
+    实现与 `src/storage.py` 同源（正则只在那写一遍）；这里只把 `ValueError` 翻成
+    工具的 `GuardError`，让 CLI 照旧走 `EXIT_GUARD`。
+    """
+    try:
+        return storage_safe_key(key)
+    except ValueError as exc:
+        raise GuardError(str(exc)) from exc
 
 
 def resolve_path(path: Path | str) -> Path:

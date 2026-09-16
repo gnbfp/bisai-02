@@ -15,7 +15,7 @@ from src.gateway.reminder import TIER_T1
 from src.intelligence.extract import ExtractError
 from src.intelligence.llm import LLMError
 from src.models import AssignmentMeta, AssignmentRecord, Member, Roster, RubricPoint, TaskCard
-from src.storage import JsonStore
+from src.storage import INDEX, JsonStore
 
 DOC = "作业书：1 实现词法分析器 40 分。2 撰写实验报告 60 分。"
 
@@ -148,13 +148,27 @@ class _InlineThread:
 
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
+    """U2（§3.1）之后：`gateway.store` 是**进程根**，返回给用例的 `store` 是 c1 群的数据域。
+
+    索引预置成"c1 已登记 + 三个人在 c1 说过话" —— 那是 §7.2 私聊归属的正常前置；
+    想测"没有绑定"的用例自己造一个没出现在索引里的 open_id（见
+    `test_m5_without_a_binding_does_not_pretend_to_post`）。
+    """
     monkeypatch.setattr("src.gateway.app.threading.Thread", _InlineThread)
-    store = JsonStore(tmp_path / "data")
-    store.ensure_dirs()
+    root = JsonStore(tmp_path / "data-upgrade")
+    root.ensure_root_dirs()
+    store = JsonStore(root.root / "workspaces" / "c1")
+    root.write_raw(
+        INDEX,
+        {
+            "workspaces": {"c1": {"name": "群c1", "created_at": "2026-09-15T09:00:00"}},
+            "user_last_group": {"ou_user": "c1", "ou_b": "c1", "ou_c": "c1"},
+        },
+    )
     sender = FakeSender()
     downloader = FakeDownloader()
     gateway = app_module.Gateway(
-        config=None, store=store, sender=sender, downloader=downloader, llm_client=FakeLLM()
+        config=None, store=root, sender=sender, downloader=downloader, llm_client=FakeLLM()
     )
     return gateway, store, sender, downloader
 
@@ -417,10 +431,10 @@ def test_forget_pending_file_only_clears_its_own(env):
     gateway, store, _, _ = env
     _seed_pending_file(store)                      # message_id = m1
 
-    gateway._forget_pending_file("m2")             # 不是它消费的那个
+    gateway._forget_pending_file("m2", store)      # 不是它消费的那个
     assert store.load_state()["pending_file"]["file_key"] == "fk_1"
 
-    gateway._forget_pending_file("m1")
+    gateway._forget_pending_file("m1", store)
     assert "pending_file" not in store.load_state()
 
 
@@ -503,7 +517,9 @@ def test_m4_group_command_opens_the_window_and_dms_everyone(env):
 
     state = store.load_state()
     assert state["awaiting"] == "preference"
-    assert state["group_chat_id"] == "c1"
+    # U2：归属的落点是进程根 index.json 的绑定表；state 里那个全局单值不再写（对齐卡 #6）
+    assert state.get("group_chat_id") is None
+    assert gateway.store.read_raw(INDEX)["user_last_group"]["ou_user"] == "c1"
     assert sender.sent[0].chat_id == "c1"                     # 清单发群
     assert [m.receive_id_type for m in sender.sent[1:]] == ["open_id"] * 3
     assert [m.chat_id for m in sender.sent[1:]] == ["ou_user", "ou_b", "ou_c"]
@@ -665,20 +681,76 @@ def test_m5_proposal_is_relayed_anonymously_and_leaves_a_trace(env):
     assert proposals[0]["text"] == "前端用 React"
 
 
-def test_m5_without_a_known_group_does_not_pretend_to_post(env):
+def test_m5_without_a_binding_does_not_pretend_to_post(env):
+    """U2 / §7.2 / §7.4：**从没在群里互动过**的人私聊 ⇒ `NEED_GROUP`，不转达、不落盘。
+
+    判据是**按人**的（这个 open_id 在绑定表里查不到），不是"全局 group_chat_id 空"——
+    同一条判据覆盖所有私聊指令，因为它在 app 层、`route()` 之前。
+    """
     gateway, store, sender, _ = env
-    gateway.handle(_dm("我想提议：加图表", "ou_b"))
+    gateway.handle(_dm("我想提议：加图表", "ou_stranger"))
     assert sender.texts == [replies.NEED_GROUP]
     assert store.load_proposals() == []
 
 
-def test_group_id_is_remembered_from_any_group_message(env):
+def test_the_binding_follows_the_last_group_message(env):
+    """U2 / §7.2：绑定 = **最近一次群内互动**（单值映射，后发言的群胜出）；私聊不刷新。"""
     gateway, store, _, _ = env
-    gateway.handle(_inbound("随便说句话"))
-    assert store.load_state()["group_chat_id"] == "c1"
+
+    gateway.handle(_inbound("随便说句话", chat_id="c2"))
+    binding = gateway.store.read_raw(INDEX)["user_last_group"]
+    assert binding["ou_user"] == "c2"                          # 后发言的群胜出
+    assert gateway.store.read_raw(INDEX)["workspaces"]["c2"]["name"] == "群c2"   # 懒创建登记了
 
     gateway.handle(_dm("你好", "ou_b"))
-    assert store.load_state()["group_chat_id"] == "c1"        # 私聊不会把它改掉
+    assert gateway.store.read_raw(INDEX)["user_last_group"]["ou_b"] == "c1"      # 私聊不动绑定
+
+
+def test_a_silenced_group_message_still_builds_the_binding(env):
+    """U2 / 对齐卡 #3：**被 @ 门禁静默 ≠ 没互动**。
+
+    两者若绑一起，不 @ 的人永远建不了绑定 ⇒ 私聊永远 NEED_GROUP，等于把 §7.4 第 2 条
+    证据槽的正常路径打断。所以刷新在 `handle()` 里、`route()` 之前。
+    """
+    gateway, store, sender, _ = env
+    gateway.handle(_inbound("不 @ 随便说句话", bot_mentioned=False, sender_open_id="ou_dana"))
+
+    assert sender.texts == []                                    # 门禁照旧静默
+    assert gateway.store.read_raw(INDEX)["user_last_group"]["ou_dana"] == "c1"
+
+
+def test_a_file_message_in_the_group_also_builds_the_binding(env):
+    """对齐卡 #4：文件 / 图片消息也算互动 —— 投过作业书的人必须建得上绑定。
+
+    刷新写在文本路径里就会漏掉这一类：资源分支在 `route()` 第一段就 return 了。
+    """
+    gateway, store, sender, _ = env
+    gateway.handle(
+        _inbound("", message_type="file", bot_mentioned=False, sender_open_id="ou_erin")
+    )
+
+    assert gateway.store.read_raw(INDEX)["user_last_group"]["ou_erin"] == "c1"
+    assert store.load_state()["pending_file"], "群里投的文件进**这个群**的缓存（D-45 ①）"
+
+
+def test_every_private_command_without_a_binding_gets_need_group(env):
+    """§7.4：判据在 app 层 ⇒ **所有**依赖归属的私聊指令都按人判，不只「我想提议：」。"""
+    gateway, store, sender, _ = env
+
+    for text in ("我想提议：加图表", "你想做哪一块", "报告", "我要做 T1", "作业书"):
+        gateway.handle(_dm(text, "ou_stranger"))
+
+    assert sender.texts == [replies.NEED_GROUP] * 5
+    assert store.load_state() == {}                              # 没归属 ⇒ 一个字都不落盘
+
+
+def test_the_process_root_only_keeps_the_index(env):
+    """§3.1：进程根只许有 `index.json`（跨工作空间的东西）与 `workspaces\` 目录。"""
+    gateway, store, _, _ = env
+    gateway.handle(_inbound("你想做哪一块"))
+
+    assert sorted(p.name for p in gateway.store.root.iterdir()) == ["index.json", "workspaces"]
+    assert (gateway.store.root / "workspaces" / "c1" / "seen.json").is_file()
 
 
 def test_a_failed_direct_message_does_not_eat_the_group_reply(env):
@@ -963,7 +1035,7 @@ def test_report_from_a_member_is_refused_and_runs_nothing(env):
 def test_images_are_delivered_through_the_sender(env):
     gateway, store, sender, _ = env
 
-    gateway._deliver(Outcome(images=(ImageOut(chat_id="c1", path="gantt.png"),)))
+    gateway._deliver(Outcome(images=(ImageOut(chat_id="c1", path="gantt.png"),)), store)
 
     assert sender.images == [("c1", "gantt.png", "chat_id")]
 
@@ -977,7 +1049,7 @@ def test_a_failed_gantt_is_reported_in_the_group(env):
             raise RuntimeError("boom")
 
     gateway.sender = _NoImageSender()
-    gateway._deliver(Outcome(images=(ImageOut(chat_id="c1", path="gantt.png"),)))
+    gateway._deliver(Outcome(images=(ImageOut(chat_id="c1", path="gantt.png"),)), store)
 
     assert gateway.sender.texts == [replies.IMAGE_SEND_FAILED]
 
@@ -1004,7 +1076,8 @@ def test_resettling_keeps_completed_at_only_for_the_same_assignee(env):
                 {"task_id": "T1", "assignee": "ou_a", "source": "volunteer_1"},
                 {"task_id": "T2", "assignee": "ou_b", "source": "volunteer_1"},
             )
-        )
+        ),
+        store,
     )
 
     records = {r.task_id: r for r in store.load_assignments()}
@@ -1014,7 +1087,7 @@ def test_resettling_keeps_completed_at_only_for_the_same_assignee(env):
 
 def _seed_due_task(store, hours=30):
     deadline = (datetime.now() + timedelta(hours=hours)).isoformat(timespec="minutes")
-    store.save_state({"group_chat_id": "c1"})
+    # U2：催办扫的是"索引里登记过的每个工作空间"，不再靠 state.group_chat_id（夹具已建索引）
     store.save_assignment(
         AssignmentMeta(
             course="编译原理",
@@ -1073,9 +1146,10 @@ def test_a_failed_reminder_is_still_recorded(env):
 
 
 def test_reminder_scan_without_a_known_group_does_nothing(env):
+    """一个工作空间都没登记过（没人说过话）⇒ 什么都不做，更不许把 @ 发错群。"""
     gateway, store, sender, _ = env
     _seed_due_task(store)
-    store.save_state({})                                     # 还没见过任何群消息
+    gateway.store.write_raw(INDEX, {})                        # 索引空 = 还没见过任何群消息
 
     assert gateway.scan_reminders() == []
     assert sender.sent == []

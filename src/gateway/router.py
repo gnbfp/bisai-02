@@ -112,6 +112,7 @@ def route(
     direction: dict | None = None,
     now: datetime | None = None,
     source_title: str = "",
+    group_chat_id: str = "",
 ) -> Outcome:
     """一条消息 → 一个 Outcome。顺序严格按 D-33：剥 @段 → 状态 → 前缀 → 兜底。
 
@@ -259,6 +260,7 @@ def route(
         direction=direction,
         now=now,
         source_title=source_title,
+        group_chat_id=group_chat_id,
     )
 
 
@@ -274,6 +276,7 @@ def _by_prefix(
     direction: dict | None = None,
     now: datetime | None = None,
     source_title: str = "",
+    group_chat_id: str = "",
 ) -> Outcome:
     """D-33 的第 3、4 步：**9 条**前缀精确匹配 → 都不中就是指令列表（T01）。"""
     text = strip_mentions(inbound.text, inbound.mentions).strip()
@@ -306,7 +309,7 @@ def _by_prefix(
             inbound, state, cards, roster, preferences, now, source_title=source_title
         )
     if any(text.startswith(prefix) for prefix in PROPOSAL_PREFIXES):
-        return _proposal(text, inbound, state, roster, now)
+        return _proposal(text, inbound, state, roster, now, group_chat_id=group_chat_id)
     match = COMPLETE_PATTERN.match(text)
     if match:
         # 编号由 router 捕获（判定只有一处），剩下的"是不是你的卡 / 标没标过"归 M6
@@ -377,7 +380,12 @@ def _with_closing(outcome: Outcome, closing: Outcome | None) -> Outcome:
 
 
 def _proposal(
-    text: str, inbound: Inbound, state: dict, roster=None, now: datetime | None = None
+    text: str,
+    inbound: Inbound,
+    state: dict,
+    roster=None,
+    now: datetime | None = None,
+    group_chat_id: str = "",
 ) -> Outcome:
     """M5 匿名代言（§6.5 / D-55）：私聊提议 → 落盘留痕 → 群里匿名**原样**转达。
 
@@ -388,6 +396,9 @@ def _proposal(
     **只有花名册成员能代言**（F5）：否则任何陌生人都能用反正不透名的
     “有组员提议：…”往群里灌任何话，还会被当成组员留痕。口径与 M4 收志愿同款：
     非成员不转发、不落盘，只回一句（D-61 ②）；``roster`` 为空 = 还没登记，谁都算数。
+
+    **往哪个群转**由 app 层传进来的 ``group_chat_id`` 决定（U2 / §7.4：归属按人，
+    不再是全局 `state.group_chat_id`）；它为空才回退读 state，仅为旧数据兼容。
     """
     known = {member.open_id for member in (getattr(roster, "members", None) or ())}
     if known and inbound.sender_open_id not in known:
@@ -401,7 +412,9 @@ def _proposal(
     if not content:
         return Outcome(replies=(reply(inbound, replies.PROPOSAL_EMPTY),))
 
-    group = (state or {}).get("group_chat_id") or ""
+    # U2（§7.2）：群由 app 层按人绑定的工作空间选好传进来；`state.group_chat_id` 只作
+    # 旧数据兼容（那个字段 U2 起只读、停更，新写入路径一处都不写它）。
+    group = group_chat_id or (state or {}).get("group_chat_id") or ""
     if not group:
         # 发不到群就别假装发了：不转达、也不落盘（留痕是给"已发布的内容"追责用的）
         return Outcome(replies=(reply(inbound, replies.NEED_GROUP),))

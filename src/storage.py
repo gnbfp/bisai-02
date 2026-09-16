@@ -12,6 +12,12 @@
      重放同一份内容不再刷新 mtime —— 免得"没改也写"给监控 / 增量同步添噪声，
      也省掉每个 worker 每轮一次无意义的整份原子替换（§8.2 v1.8 的条件写）。
 
+**两段式布局**（升级版，§3.1）：进程根 `data-upgrade\` 只有两样跨工作空间的东西 ——
+`index.json`（工作空间索引）与 `app.lock`（单实例锁）；每个群的数据在
+`data-upgrade\workspaces\<群 chat_id>\` 下，还是这份文件名清单 + `uploads\`。
+`JsonStore(root)` 的语义没变（换个根 = 换一个数据域），"按消息选哪个 root" 在 app 层
+（`src/gateway/workspace.py`）。
+
 `state.json` / `proposals.json` 只提供裸读写入口：它们的字段 requirements.md
 没有定义，按 §8 的规矩不臆想，等拍板后再补类型（见 src/models.py 末尾）。
 """
@@ -20,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Any, Callable
@@ -49,6 +56,10 @@ __all__ = [
     "REMINDERS",
     "REPORT",
     "GANTT",
+    "INDEX",
+    "WORKSPACES",
+    "safe_key",
+    "workspace_dir",
 ]
 
 # 文件名对照 docs/ARCHITECTURE.md §4
@@ -70,6 +81,12 @@ REPORT = "report.md"
 GANTT = "gantt.png"
 UPLOADS = "uploads"
 
+# ---- 进程根的两样（§3.1 两段式布局的第一段）----
+# 与 tools/migrate_workspace.py 同源（那边 import 这两个名字，别再另写字面量）：
+# 迁移工具按它们建盘，运行时按它们找盘 —— 两边字面量一旦分叉，迁移进来的工作空间就"看不见"。
+INDEX = "index.json"       # 工作空间索引：workspaces{name, created_at, migrated_from} + user_last_group
+WORKSPACES = "workspaces"  # 每个群一个子目录，目录名 = safe_key(群 chat_id)
+
 # 进程级锁：单进程（B1）⇒ 全局唯一落盘 ⇒ 一把锁就够
 _GLOBAL_LOCK = threading.RLock()
 
@@ -77,6 +94,26 @@ _GLOBAL_LOCK = threading.RLock()
 def _dumps(payload: Any) -> str:
     """落盘文本的**唯一**生成处：缩进 2 + 结尾换行（`json.dumps` 的参数只写这一遍）。"""
     return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+
+_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def safe_key(key: str) -> str:
+    """群标识当路径段用之前先校验：只允许 ``[A-Za-z0-9_-]``（防目录穿越）。
+
+    与 ``tools/migrate_workspace.py`` 的 ``safe_key()`` 同一条正则（那边 import 这里，
+    把 ``ValueError`` 翻成它自己的 ``GuardError``）—— 工具建的目录名必须能被运行时按
+    同一个 chat_id 找回来。
+    """
+    if not _KEY_RE.match(str(key or "")):
+        raise ValueError(f"非法路径段 {key!r}：只允许 [A-Za-z0-9_-]（防目录穿越）")
+    return str(key)
+
+
+def workspace_dir(root: Path | str, chat_id: str) -> Path:
+    """某个群的工作空间目录：``<进程根>\workspaces\<safe_key(chat_id)>``（§3.1）。"""
+    return Path(root) / WORKSPACES / safe_key(chat_id)
 
 
 class JsonStore:
@@ -170,6 +207,16 @@ class JsonStore:
         with self._lock:
             self.root.mkdir(parents=True, exist_ok=True)
             self.uploads.mkdir(parents=True, exist_ok=True)
+
+    def ensure_root_dirs(self) -> None:
+        """**进程根**该有的东西：根目录 + `workspaces\\`（§3.1 第一段）。
+
+        工作空间内部目录（含 `uploads\\`）由各自的 ``JsonStore`` 按需创建 ——
+        `ensure_dirs()` 是"这个根自己要 uploads"的老用法（MVP 的扁平 `data\\`）。
+        """
+        with self._lock:
+            self.root.mkdir(parents=True, exist_ok=True)
+            (self.root / WORKSPACES).mkdir(parents=True, exist_ok=True)
 
     # ---------- 泛型：单对象 / 列表 ----------
 

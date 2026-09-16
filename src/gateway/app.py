@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.config import ConfigError, load_config
-from src.gateway import allocation, reminder, replies, vote
+from src.gateway import allocation, reminder, replies, vote, workspace
 from src.gateway.client import FeishuClient
 from src.gateway.events import ImageOut, Inbound, Outcome, Reply, reply, to_inbound
 from src.gateway.router import route
@@ -132,6 +132,9 @@ class Gateway:
     """把连接层、纯路由、落盘、智能层接起来。全是依赖注入，方便离线测。"""
 
     def __init__(self, config, store, sender, downloader, llm_client=None) -> None:
+        # U2（§3.1）：传进来的是**进程根** store —— 它只该装 index.json（归属绑定）与
+        # app.lock。每个群的数据域在 workspaces\<chat_id>\，由 handle() 按消息选
+        # （workspace.store_for），请求路径上的读写一律走选出来的那个 store。
         self.config = config
         self.store = store
         self.sender = sender
@@ -150,9 +153,14 @@ class Gateway:
             )
 
     def handle(self, inbound: Inbound) -> Outcome:
-        """快路径：路由 → 回话 → 落盘 → 需要时起后台重活。
+        """快路径：**先选工作空间** → 路由 → 回话 → 落盘 → 需要时起后台重活。
 
-        第一件事是**按 message_id 去重**（P0-A）：飞书会重复投递 / 重连补投同一个
+        第一步是**选 root**（U2 / §3.1）：群消息用 `inbound.chat_id`；私聊用
+        `index.json` 的 `user_last_group` 绑定（§7.2）。群消息顺手刷新绑定 ——
+        **被 @ 门禁静默的、文件 / 图片的都算互动**（都是人在群里说话）。
+        两个都拿不到（私聊且从没在群里互动过）⇒ 回 `NEED_GROUP`，不猜、不落盘、不起重活。
+
+        第二步是**按 message_id 去重**（P0-A）：飞书会重复投递 / 重连补投同一个
         事件，不去重就会把同一条指令完整跑两遍（新群"先清单、再总表"就是这么来的）。
         重复事件直接丢掉：不发消息、不写业务数据。
 
@@ -163,50 +171,71 @@ class Gateway:
             f"from={inbound.sender_open_id} type={inbound.message_type} "
             f"text={inbound.text[:40]}"
         )
-        if self._is_duplicate(inbound.message_id):
+        # 第一步：**选工作空间**（U2 / §3.1）。群消息零歧义，用这条消息的 chat_id；
+        # 顺手刷新绑定（被门禁静默的、文件 / 图片的都算互动 —— 所以放在 route() 之前）。
+        # 私聊没有"我是哪个群的"：查 index.json 的绑定表（§7.2）。
+        group = inbound.chat_id if inbound.chat_type == "group" else ""
+        workspace.refresh(self.store, inbound)
+        if not group:
+            group = workspace.bound_group(self.store, inbound.sender_open_id)
+        if not group:
+            # §7.2 第 2 行：从没在任何群里互动过 ⇒ 不知道归属，**不猜**（不落盘、不起
+            # 重活，只回一句）。没有工作空间也就没有 seen.json 可记，所以这条分支不去重：
+            # 重复投递顶多多回一句 NEED_GROUP，没有副作用。
+            print(f"[M0] {_stamp()} none 没有绑定 id={inbound.message_id}")
+            self._send(reply(inbound, replies.NEED_GROUP))
+            return Outcome()
+        store = workspace.store_for(self.store.root, group)
+
+        # 第二步：按 message_id 去重（P0-A）—— 去重表在工作空间里（§3.1 的 seen.json）。
+        if self._is_duplicate(inbound.message_id, store):
             # 去重命中也要留痕，否则看不出到底有没有重复投递（P1-G / P0-A）
             print(f"[M0] {_stamp()} dup 跳过 id={inbound.message_id}")
             return Outcome()
-        self._remember_group(inbound)
-        state = self.store.load_state()
-        has_rubric = bool(self.store.load_rubric())
-        meta = self.store.load_assignment()
+        state = store.load_state()
+        has_rubric = bool(store.load_rubric())
+        meta = store.load_assignment()
         outcome = route(
             inbound,
             state,
-            self.store.load_members(),
+            store.load_members(),
             has_rubric=has_rubric,
-            cards=self.store.load_cards(),
-            preferences=self.store.load_preferences(),
-            assignments=self.store.load_assignments(),
+            cards=store.load_cards(),
+            preferences=store.load_preferences(),
+            assignments=store.load_assignments(),
             # U6 的"覆盖已定方向要组长确认"要看盘上有没有已落定方向（§5.3）——
             # 读盘归 app 层，判定仍在纯函数里
-            direction=self.store.load_direction(),
+            direction=store.load_direction(),
             source_title=meta.title if meta else "",
+            # U2：归属群由 app 层选好（群消息 = 这条消息的 chat_id；私聊 = 绑定表）
+            group_chat_id=group,
         )
-        failures = self._deliver(outcome)
+        failures = self._deliver(outcome, store)
         # 主动私聊发不出去要说出来（P0-C）：否则"群里说清单已发、实际没人收到"。
-        self._report_dm_failures(failures, outcome.state or state)
+        self._report_dm_failures(failures, outcome.state or state, group=group)
 
         # 重活起不起，route() 已经判过（Outcome.pipeline）—— 这里不再自己判一遍，
         # 否则"回了「表单没看懂」却照样跑 M1"（必修 4）
         if outcome.pipeline:
             threading.Thread(
-                target=self.run_pipeline, args=(outcome.pipeline, inbound, state), daemon=True
+                target=self.run_pipeline,
+                args=(outcome.pipeline, inbound, state, store),
+                daemon=True,
             ).start()
         return outcome
 
-    def _is_duplicate(self, message_id: str) -> bool:
-        """P0-A：同一条消息只处理一次。落 ``data/seen.json``，只留最近 ``_SEEN_LIMIT`` 条。
+    def _is_duplicate(self, message_id: str, store: JsonStore) -> bool:
+        """P0-A：同一条消息只处理一次。落**该工作空间**的 ``seen.json``，只留最近
+        ``_SEEN_LIMIT`` 条（去重表跟数据同域，U2 之后一个进程管多个群）。
 
         ``message_id`` 为空（老事件 / 单测夹具）时不去重 —— 没有标识就没法认人。
         """
         if not message_id:
             return False
-        seen = self.store.read_raw(SEEN, []) or []
+        seen = store.read_raw(SEEN, []) or []
         if message_id in seen:
             return True
-        self.store.mutate_raw(
+        store.mutate_raw(
             SEEN, lambda items: [*(items or []), message_id][-_SEEN_LIMIT:], default=[]
         )
         return False
@@ -227,7 +256,7 @@ class Gateway:
         )
         return None
 
-    def _deliver(self, outcome: Outcome) -> tuple[Reply, ...]:
+    def _deliver(self, outcome: Outcome, store: JsonStore) -> tuple[Reply, ...]:
         """发出所有回复，返回**发失败的**那些（P0-C）。每条都打一行轨迹（P1-J）。"""
         failed: list[Reply] = []
         for message in outcome.replies:
@@ -236,31 +265,33 @@ class Gateway:
             if self._send(message) is not None:
                 failed.append(message)
         if outcome.state is not None:
-            self.store.save_state(outcome.state)
+            store.save_state(outcome.state)
         if outcome.save_roster is not None:
-            self.store.save_members(Roster.from_dict(outcome.save_roster))
+            store.save_members(Roster.from_dict(outcome.save_roster))
         if outcome.save_preference is not None:
-            self._save_preference(outcome.save_preference)
+            self._save_preference(store, outcome.save_preference)
         if outcome.save_assignments:
-            self._save_assignments(outcome.save_assignments)
+            self._save_assignments(store, outcome.save_assignments)
         if outcome.save_proposal is not None:
-            self._save_proposal(outcome.save_proposal)
+            self._save_proposal(store, outcome.save_proposal)
         if outcome.save_direction is not None:
-            self._save_direction(outcome.save_direction)
+            self._save_direction(store, outcome.save_direction)
         if outcome.save_complete is not None:
-            self._save_complete(outcome.save_complete)
+            self._save_complete(store, outcome.save_complete)
         for image in outcome.images:                 # M7 甘特图：文本先发、图后发
             if self._send_image(image) is not None:  # 图发失败要在群里说（必修 D）
                 self._send(Reply(chat_id=image.chat_id, text=replies.IMAGE_SEND_FAILED))
         return tuple(failed)
 
-    def _report_dm_failures(self, failures, state) -> None:
-        """私聊发不出去就在群里补一句（P0-C）。只统计 ``open_id`` 目标 —— 那才是"人"。"""
+    def _report_dm_failures(self, failures, state, group: str = "") -> None:
+        """私聊发不出去就在群里补一句（P0-C）。只统计 ``open_id`` 目标 —— 那才是"人"。
+
+        群取**志愿窗口自己记的** chat_id（P1-H），取不到再用 app 层选好的归属群（U2）；
+        两处都不读 `state.group_chat_id` —— 那个字段 U2 起只读、停更（对齐卡 #6）。
+        """
         dm_failed = [r for r in failures if r.receive_id_type == "open_id"]
-        # 群取**志愿窗口自己记的** chat_id（P1-H），取不到再退回 state.group_chat_id ——
-        # 同 settle()：窗口开着时只要有别的群来一条消息，group_chat_id 就会被刷成那个群
         pref = (state or {}).get("preference") or {}
-        group = pref.get("chat_id") or (state or {}).get("group_chat_id") or ""
+        group = pref.get("chat_id") or group or ""
         if not dm_failed or not group:
             return
         self._send(
@@ -272,42 +303,27 @@ class Gateway:
 
     # ---------- M4 / M5 的落盘 ----------
 
-    def _remember_group(self, inbound: Inbound) -> None:
-        """任何群消息都刷新 ``state.group_chat_id``（D-54）。
-
-        M4 的清单 / 总表、M5 的匿名转达都要**主动发到群**，而 router 是纯函数、不读
-        文件 —— 所以"群是哪个"由 app 层记进 state。机器人自己的消息不算：那是回声，
-        不是"群里有人在活动"。
-        """
-        if inbound.sender_type == "app" or inbound.chat_type != "group" or not inbound.chat_id:
-            return
-        state = self.store.load_state()
-        if state.get("group_chat_id") == inbound.chat_id:
-            return
-        state["group_chat_id"] = inbound.chat_id
-        self.store.save_state(state)
-
-    def _save_preference(self, payload: dict) -> None:
+    def _save_preference(self, store: JsonStore, payload: dict) -> None:
         """按 ``user_id`` **覆盖**写志愿（后投覆盖先投，D-33 / §6.3）。
 
         走 ``mutate_many``：它是"类型化列表的原子读-改-写"，正是为 M4 收志愿准备的
         原语 —— 两个组员同时私聊回复时不会丢更新。
         """
         preference = Preference.from_dict(payload)
-        self.store.mutate_many(
+        store.mutate_many(
             PREFERENCES,
             Preference,
             lambda items: [p for p in items if p.user_id != preference.user_id] + [preference],
         )
 
-    def _save_assignments(self, payloads) -> None:
+    def _save_assignments(self, store: JsonStore, payloads) -> None:
         """整份分配结果一次性覆盖（M4 结算，§6.4）。
 
         ``completed_at`` 是执行期的证据，不能因为重开一次志愿窗口就归零（D-67）——
         覆盖前按 ``task_id`` 把旧的完成时间合并回来，**但只在负责人没变时**：
         卡换了人，新负责人的"完成"不该继承前任的。
         """
-        previous = {r.task_id: r for r in (self.store.load_assignments() or ())}
+        previous = {r.task_id: r for r in (store.load_assignments() or ())}
         merged = []
         for payload in payloads:
             record = AssignmentRecord.from_dict(payload)
@@ -315,21 +331,21 @@ class Gateway:
             if not record.completed_at and old is not None and old.assignee == record.assignee:
                 record = replace(record, completed_at=old.completed_at)
             merged.append(record)
-        self.store.save_assignments(merged)
+        store.save_assignments(merged)
 
-    def _save_proposal(self, payload: dict) -> None:
+    def _save_proposal(self, store: JsonStore, payload: dict) -> None:
         """追加一条提议 —— **含真实 ``user_id``**，这是防滥用留痕（§6.5）。
 
         ``proposals.json`` 的字段级定义在 requirements 里没有（§6.5 只规定了语义），
         所以走裸 JSON 的原子读-改-写，不硬造数据类。
         """
-        self.store.mutate_raw(PROPOSALS, lambda items: [*(items or []), payload], default=[])
+        store.mutate_raw(PROPOSALS, lambda items: [*(items or []), payload], default=[])
 
-    def _save_direction(self, payload: dict) -> None:
+    def _save_direction(self, store: JsonStore, payload: dict) -> None:
         """整份方向结果一次性覆盖（M2 落定，§2.6）—— 裸 JSON，口径同 proposals.json。"""
-        self.store.save_direction(payload)
+        store.save_direction(payload)
 
-    def _save_complete(self, payload: dict) -> None:
+    def _save_complete(self, store: JsonStore, payload: dict) -> None:
         """M6 的完成标记（§2.1）：走 ``mutate_many`` **只改那一条**，其余原样。
 
         两件事都写进 ``assignments.json`` 的同一行，所以必须走那个"类型化列表的原子
@@ -337,7 +353,7 @@ class Gateway:
         """
         task_id = payload.get("task_id")
         completed_at = payload.get("completed_at")
-        self.store.mutate_many(
+        store.mutate_many(
             ASSIGNMENTS,
             AssignmentRecord,
             lambda items: [
@@ -366,7 +382,7 @@ class Gateway:
 
     # ---------- 慢路径：M1 / M2 / M3 ----------
 
-    def run_pipeline(self, kind: str, inbound: Inbound, state: dict) -> None:
+    def run_pipeline(self, kind: str, inbound: Inbound, state: dict, store: JsonStore) -> None:
         """后台线程里跑。异常一律转成一句人话回群里（方案 §7：不能静默失败）。
 
         回话一律走 ``_send()``（P1-J）：它不抛异常、失败也留轨迹 —— 否则
@@ -374,13 +390,13 @@ class Gateway:
         """
         try:
             if kind == "assignment":
-                self._run_assignment(inbound, state)
+                self._run_assignment(inbound, state, store)
             elif kind == "decompose":
-                self._run_decompose(inbound)
+                self._run_decompose(inbound, store)
             elif kind == "direction":
-                self._run_direction(inbound)
+                self._run_direction(inbound, store)
             elif kind == "report":
-                self._run_report(inbound)
+                self._run_report(inbound, store)
         except ExtractError as exc:
             self._send(reply(inbound, replies.EXTRACT_REJECTED.format(reason=exc)))
         except LLMError:
@@ -392,12 +408,12 @@ class Gateway:
         finally:
             if kind == "assignment":
                 pending = (state or {}).get("pending_file") or {}
-                self._forget_pending_file(pending.get("message_id", ""))
+                self._forget_pending_file(pending.get("message_id", ""), store)
 
-    def _run_assignment(self, inbound: Inbound, state: dict) -> None:
+    def _run_assignment(self, inbound: Inbound, state: dict, store: JsonStore) -> None:
         """作业书 → 下载 → 抽文本 → M1 → **必须续跑 M3** → 核对清单发群（方案 §7）。"""
         pending = (state or {}).get("pending_file") or {}
-        path = self.downloader.download(pending, self.store.uploads)
+        path = self.downloader.download(pending, store.uploads)
 
         text = extract_text(path)
         parsed = parse_assignment(text, self._llm(), source_file=path.name)
@@ -412,9 +428,9 @@ class Gateway:
         # 盘上就会留下“新 rubric + 旧 cards”的混用快照，下一轮「拆解」会拿新评分点去配旧卡。
         # 所以 decompose() 成功之后再一次性写完；失败就保持上一份快照不动。
         result = decompose(parsed.points, self._llm())
-        self.store.save_assignment(parsed.meta)
-        self.store.save_rubric(list(parsed.points))
-        self.store.save_cards(list(result.cards))
+        store.save_assignment(parsed.meta)
+        store.save_rubric(list(parsed.points))
+        store.save_cards(list(result.cards))
 
         report = render_checklist(parsed.meta, parsed.points, result.cards, result)
         # 三道软校验都只警告、不拒收（§7.5）：权重加总 + D-43 的部首残留 + D-49 的截止时间。
@@ -431,13 +447,13 @@ class Gateway:
             report += "\n\n" + "\n".join(f"[软警告] {w}" for w in warnings)
         self._send(reply(inbound, report))
 
-    def _run_decompose(self, inbound: Inbound) -> None:
+    def _run_decompose(self, inbound: Inbound, store: JsonStore) -> None:
         """「拆解」：用现有评分点重跑 M3，再出一份核对清单。"""
-        points = self.store.load_rubric()
+        points = store.load_rubric()
         result = decompose(points, self._llm())
-        self.store.save_cards(list(result.cards))
+        store.save_cards(list(result.cards))
 
-        meta = self.store.load_assignment()
+        meta = store.load_assignment()
         if meta is None:
             coverage = coverage_loop(result.cards, points)
             self._send(
@@ -452,24 +468,24 @@ class Gateway:
             reply(inbound, render_checklist(meta, points, result.cards, result))
         )
 
-    def _run_direction(self, inbound: Inbound) -> None:
+    def _run_direction(self, inbound: Inbound, store: JsonStore) -> None:
         """「方向」：评分点 → 2–3 个候选（M2 唯一的 LLM 点）→ 开投票窗口发群（§2.2）。
 
         前置缺哪个就回哪句、不发候选：与 router 的判定口径一致（必修 4）。
         开窗时**重新读一次 state**（生成要花十几秒），别拿十几秒前的快照覆盖回盘 ——
         不然这期间别人刚建的花名册 / 窗口会被一起写没。
         """
-        points = self.store.load_rubric()
+        points = store.load_rubric()
         if not points:
             # D-48 口径：没有评分点就不生成，不烧 token
             self._send(reply(inbound, replies.NEEDS_RUBRIC))
             return
-        roster = self.store.load_members()
+        roster = store.load_members()
         if roster is None or not roster.members:
             self._send(reply(inbound, replies.VOTE_NEED_ROSTER))
             return
         try:
-            result = generate_directions(points, self.store.load_assignment(), self._llm())
+            result = generate_directions(points, store.load_assignment(), self._llm())
         except LLMError:
             # 生成不出来就直说，别让群里干等（也不套用「作业书解析失败」那句不对路的兜底）
             self._send(reply(inbound, replies.VOTE_GENERATE_FAILED))
@@ -479,23 +495,23 @@ class Gateway:
             return
         outcome = vote.open_window(
             inbound,
-            self.store.load_state(),
+            store.load_state(),
             [direction.to_dict() for direction in result.directions],
         )
-        failures = self._deliver(outcome)
-        self._report_dm_failures(failures, outcome.state or {})
+        failures = self._deliver(outcome, store)
+        self._report_dm_failures(failures, outcome.state or {}, group=inbound.chat_id)
 
-    def _run_report(self, inbound: Inbound) -> None:
+    def _run_report(self, inbound: Inbound, store: JsonStore) -> None:
         """M7 执行报告（D-64 / D-65）：分配总表 + 核对清单 + 甘特图，发群。
 
         报告是**从盘上重读的快照**：自检项按现状重算（``generations=0`` —— 报告不是拆解，
         没有"这一版拆了几轮"这回事）。文本落 ``data/report.md``、图落 ``data/gantt.png``。
         """
-        meta = self.store.load_assignment()
-        points = self.store.load_rubric()
-        cards = self.store.load_cards()
-        assignments = self.store.load_assignments()
-        roster = self.store.load_members()
+        meta = store.load_assignment()
+        points = store.load_rubric()
+        cards = store.load_cards()
+        assignments = store.load_assignments()
+        roster = store.load_members()
         if meta is None or not points or not cards or not assignments:
             self._send(reply(inbound, replies.REPORT_NEED_ASSIGNMENTS))
             return
@@ -503,7 +519,7 @@ class Gateway:
             cards=tuple(cards), failures=tuple(check(cards, points)), generations=0
         )
         try:
-            gantt = render_gantt(cards, assignments, meta, self.store.path(GANTT), roster)
+            gantt = render_gantt(cards, assignments, meta, store.path(GANTT), roster)
         except Exception as exc:                     # 渲染崩了也要说话（方案 §7）
             print(f"[M0] {_stamp()} 甘特图渲染失败：{type(exc).__name__}: {exc}", file=sys.stderr)
             self._send(reply(inbound, replies.REPORT_FAILED))
@@ -515,13 +531,13 @@ class Gateway:
             assignments,
             cards,
             roster,
-            self.store.load_preferences(),
+            store.load_preferences(),
             show_completion=True,
         )
         checklist_text = render_checklist(
             meta, points, cards, result, assignments=assignments, roster=roster
         )
-        self.store.path(REPORT).write_text(
+        store.path(REPORT).write_text(
             board_text + "\n\n" + checklist_text + "\n", encoding="utf-8"
         )
         self._deliver(
@@ -531,51 +547,54 @@ class Gateway:
                     Reply(chat_id=inbound.chat_id, text=checklist_text),
                 ),
                 images=(ImageOut(chat_id=inbound.chat_id, path=str(gantt)),),
-            )
+            ),
+            store,
         )
 
-    def _forget_pending_file(self, file_message_id: str) -> None:
+    def _forget_pending_file(self, file_message_id: str, store: JsonStore) -> None:
         """只清**这一轮消费掉的那个文件**（按 message_id 认）。
 
         跑 M1 的十几秒里群里可能又来了新 PDF：无脑 pop 会把新文件一起删掉，之后
         「作业书」回「请先把作业书文件发给我」—— 用户明明刚发过（必修 5）。
         成败都清（不留旧文件），但只在还是同一个文件时才清。
         """
-        state = self.store.load_state()
+        state = store.load_state()
         pending = state.get("pending_file") or {}
         if (pending.get("message_id") or "") != (file_message_id or ""):
             return
         state.pop("pending_file", None)
-        self.store.save_state(state)
+        store.save_state(state)
 
     # ---------- 慢路径的定时器：M6 催办 ----------
 
     def scan_reminders(self, now: datetime | None = None) -> list:
-        """M6 临期扫描一轮（§2.2）：发群 @负责人，成败都记 ``data/reminders.json``。
+        """M6 临期扫描一轮（§2.2）：发群 @负责人，成败都记该工作空间的 ``reminders.json``。
 
-        群取 ``state.group_chat_id``（单群假设 D-57）；取不到就跳过并打一行日志 ——
-        **宁可漏催，不可把 @ 发到错误的群**。去重靠 ``(task_id, tier)``（见 ``reminder.scan``）。
+        U2（§3.1）：一个进程管**多个**工作空间 ⇒ 遍历索引里登记过的每个群各扫一遍；
+        群标识 = 工作空间 key（新布局下 key 就是群 chat_id，零歧义，不再读
+        `state.group_chat_id`）。一个群都没有就什么都不做（还没人说过话）。
+        去重靠 ``(task_id, tier)``（见 ``reminder.scan``）。
         """
-        group = (self.store.load_state() or {}).get("group_chat_id") or ""
-        if not group:
-            print(f"[M6] {_stamp()} 催办跳过：还不知道群是哪个（先让群里有人说句话）")
-            return []
         _, tier1, tier2 = reminder.settings()
-        due = reminder.scan(
-            self.store.load_cards(),
-            self.store.load_assignments(),
-            self.store.load_assignment(),
-            self.store.read_raw(REMINDERS, []) or [],
-            now,
-            tier1_hours=tier1,
-            tier2_hours=tier2,
-        )
-        for item in due:
-            ok = self._send(Reply(chat_id=group, text=item.text)) is None
-            record = item.to_record(group, _stamp(), ok)
-            self.store.mutate_raw(
-                REMINDERS, lambda items, row=record: [*(items or []), row], default=[]
+        due: list = []
+        for group in workspace.bound_chats(self.store):
+            store = workspace.store_for(self.store.root, group)
+            found = reminder.scan(
+                store.load_cards(),
+                store.load_assignments(),
+                store.load_assignment(),
+                store.read_raw(REMINDERS, []) or [],
+                now,
+                tier1_hours=tier1,
+                tier2_hours=tier2,
             )
+            for item in found:
+                ok = self._send(Reply(chat_id=group, text=item.text)) is None
+                record = item.to_record(group, _stamp(), ok)
+                store.mutate_raw(
+                    REMINDERS, lambda items, row=record: [*(items or []), row], default=[]
+                )
+            due.extend(found)
         return due
 
     def start_reminder_loop(self) -> None:
@@ -613,8 +632,10 @@ def main(argv=None) -> int:
         print(f"[配置错误] {exc}", file=sys.stderr)
         return 2
 
+    # U2（§3.1）：这里的 store 是**进程根**（只装 index.json + app.lock）——
+    # 每个群的数据域在 workspaces\<chat_id>\，由 Gateway.handle() 按消息选。
     store = JsonStore(config.data_dir)
-    store.ensure_dirs()
+    store.ensure_root_dirs()
 
     # P0-E：单实例保护。真机故障是两个进程跑同一套凭据 → 每条消息被处理两次。
     guard = SingleInstance(store.root)
