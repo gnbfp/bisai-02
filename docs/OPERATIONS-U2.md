@@ -28,7 +28,7 @@
 
 ## 1. 动手前的四条前置检查（一条不满足就别动手）
 
-1. **进程已停** —— 迁移前必须停升级版（§3.3 第 1 步）。锁在进程根：`data-upgrade\app.lock`。工具会读它并看 pid 是否还活着（`check_process_lock()`）；进程还在跑时**默认拒绝**，`--force` 只跳过阻断、不代表进程真停了。
+1. **进程已停** —— 迁移前必须停升级版（`docs\ARCHITECTURE-UPGRADE.md` §3.3 第 1 步）。锁在进程根：`data-upgrade\app.lock`（`src/gateway/app.py` 的 `LOCK_FILE` = `tools\migrate_workspace.py` 的 `LOCK_NAME`）。**⚠️ 这道守卫只装在迁移上**：`check_process_lock()` 只在 `migrate()` 里调用 —— 进程还在跑时**默认拒绝**（`--force` 只跳过阻断、不代表进程真停了）；**回退（清空 / 重置）走 `rollback()`，它压根不查锁**。也就是说**最容易出事的动作没有工具守卫**，只能靠本节 + §4 的复核人守住。
 2. **路径解析过** —— 目标必须**严格落在** `data-upgrade\` 之内（不等于根、不在根之外）。工具用 `resolve_path()` + `guard_within()` 做这件事，不合格直接抛 `OutOfScope` 中止。**人工改 JSON 时同样按这条自查**。
 3. **备份在** —— 真跑会先备份到 `data-upgrade\_migration\<stamp>\`；同一份源数据只留一份备份（`SOURCE.sha256` 认领，重跑复用，不堆垃圾）。
 4. **先写台账** —— 动手**之前**先往 `maintenance.log` 追加一行（§3）。顺序反了就等于"没有记录"。
@@ -44,11 +44,10 @@
 **怎么做（首选现成命令，别手删目录）**：
 
 ```powershell
-# 先看它要干什么（干跑，一个字节都不写）
-python tools\migrate_workspace.py --rollback --chat-id oc_xxxxxxxxxxxxxxxx
-# 确认无误再真跑
 python tools\migrate_workspace.py --rollback --chat-id oc_xxxxxxxxxxxxxxxx
 ```
+
+**⚠️ 回退没有干跑档（v1.18 订正，原先写成「干跑」是错的）**：`--rollback` **不吃 `--apply`** —— `main()` 里 `if args.rollback:` 直接调 `rollback()`，敲下去就是**真删**（副本 + 索引条目一起没）。所以动手**之前**必须三件事齐：① 进程已停（§1 第 1 条 —— 这一条**没有工具守卫**，只能靠人）；② 台账先写（§3）；③ 复核人点头（§4）。**没有「先看一眼」的机会**，别把它当成可以随手试的命令。
 
 `--chat-id` 缺省时，工具从 `data\state.json` 的 `group_chat_id` 或索引里推；**推不出来就停手问人**（归属不明不猜）。
 
@@ -61,7 +60,7 @@ python tools\migrate_workspace.py --rollback --chat-id oc_xxxxxxxxxxxxxxxx
 **什么时候用**：工作空间内容坏了，但 `data\` 是好的（想回到"刚迁移进来"的样子）。
 
 ```powershell
-python tools\migrate_workspace.py --rollback --chat-id oc_xxxxxxxxxxxxxxxx   # 先清
+python tools\migrate_workspace.py --rollback --chat-id oc_xxxxxxxxxxxxxxxx   # 先清（真删，无干跑档 —— 见 §2.1）
 python tools\migrate_workspace.py                                             # 干跑：看计划
 python tools\migrate_workspace.py --apply                                     # 真跑：重建
 ```
@@ -157,7 +156,7 @@ python tools\migrate_workspace.py --apply                                     # 
 python tools\migrate_workspace.py --dest-root data-upgrade\_rehearsal                # 1 干跑
 python tools\migrate_workspace.py --dest-root data-upgrade\_rehearsal --apply        # 2 迁移
 python tools\migrate_workspace.py --dest-root data-upgrade\_rehearsal --apply        # 3 复跑（验幂等）
-python tools\migrate_workspace.py --dest-root data-upgrade\_rehearsal --rollback     # 4 回退
+python tools\migrate_workspace.py --dest-root data-upgrade\_rehearsal --rollback     # 4 回退（真删，无干跑档）
 ```
 
 **判据（四条，缺一条就不算过）**
@@ -178,6 +177,7 @@ python tools\migrate_workspace.py --dest-root data-upgrade\_rehearsal --rollback
 - ❌ **不许删 / 改 `data\`**（MVP 真源；工具纪律第 1 条：只复制、不移动）。
 - ❌ **不许把 `data-upgrade\` 整根清空**（那会连 `maintenance.log` 一起删掉 —— 记录和动作一起消失）。要整根清空**必须另行授权**（§3.2 的约束，PM 2026-09-16）。
 - ❌ **不许用 `--force` 掩盖"进程还在跑"** —— 它只是跳过阻断；并发写 `index.json` 会把改名 / 绑定冲掉。
+- ⚠️ **回退（清空 / 重置）没有进程锁守卫**（`rollback()` 不调 `check_process_lock()`）—— 进程在跑时它**不会拒绝**，照删不误；这一条只能靠 §1 第 1 条 + §4 的复核人守住。
 - ❌ **不许把机器绝对路径写进 `index.json`**（§5）。
 - ❌ **不许只写 `operator` 不写 `verifier`**（等于没做二次确认）。
 - ⚠️ **手工编辑 JSON 前先停进程**（2.3）。
@@ -192,3 +192,4 @@ python tools\migrate_workspace.py --dest-root data-upgrade\_rehearsal --rollback
 - [ ] 有 `MANIFEST`（`MANIFEST-migrate-*.json` 或回退的 `MANIFEST-rollback-*.json`）
 - [ ] 需要时跑过 §6 的四步演练，四条判据全过
 - [ ] `index.json` 里没有绝对路径
+- [ ] **回退类动作（清空 / 重置）动手前：进程已停 + 复核人在场**（回退没有工具守卫，见 §1 / §7）
