@@ -3,7 +3,7 @@
 > **依据**：`docs/ARCHITECTURE-UPGRADE.md` §4.6（矩阵未覆盖的三格）、§9.1（18 条失败路径话术）、§9.3 / §10.3（未验证项）。
 > **为什么只做这一部分**：这三格必须赶在 **U2 动 `data-upgrade\` 之前**验完 —— 一旦工作空间隔离落地，环境要重建，现在这份"单工作空间"的日志就再也复现不出来。
 > **本批不碰**：不迁移、不清空、不改名、不动 `data-upgrade\workspaces\`（那是 U2 的动作，走 `docs\OPERATIONS-U2.md`）。
-> **谁做**：组长（真人发消息）+ 1 名记录人（看终端日志）。**记录人必须盯着网关窗口的 stdout**。
+> **谁做**：组长（真人发消息）+ 1 名记录人。**记录人必须盯着网关的 stdout —— 即 §0 那份 `.out.log`**（不是窗口，更不是 `.err.log`）。
 
 > **时效注（v1.30，2026-09-17）**：U2（**④-a** 两段式工作空间）已于 `21fd34a` 落地，并做过一轮真机验收（`docs\evidence\2026-09-17-u2-acceptance.md`）⇒ 上面那条「必须赶在 U2 动 `data-upgrade\` 之前验完」**只对预 U2 的那批成立**（穿透批 run1–run5 已跑掉）。本清单 9/18 的定位改成两条：① 补 **U2 之后才成立**的遗留（§1 的**格 D / 格 E**）；② 正式彩排（§2 的 10 条 + T01–T13 回归执行记录表）。**`data-upgrade\workspaces\` 现在是运行时的真数据域，别再当「待重建环境」处理。**
 
@@ -11,39 +11,41 @@
 
 ## 0. 前置（5 分钟）
 
-1. **起升级版**（照抄这段；参数别自己发明）——两个窗口：一个跑网关，一个记日志。
+1. **起升级版**（照抄这段；参数别自己发明）。
 
 ```powershell
 cd D:\AI创新创业大赛
 
-# ① 清场确认：上一轮进程 / 锁文件（pid 还在 ⇒ 先把那个窗口关掉）
+# ① 清场确认：上一轮进程 / 锁文件（pid 还在 ⇒ 先 Stop-Process 掉）
 Get-Process python -ErrorAction SilentlyContinue | Select-Object Id, StartTime
 Get-Content -LiteralPath .\data-upgrade\app.lock -ErrorAction SilentlyContinue
 
-# ② 日志放仓库外：仓库里的运行日志可能带凭据（.gitignore 明令不入库），且仓库外不会被系统清理
-$logDir = 'D:\rehearsal-logs'
-New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$log   = Join-Path $logDir "u1_0918-$stamp.log"   # 每次一个新文件 —— 绝不覆盖上一轮
-
-# ③ 中文不乱码 + 日志实时刷盘（网关侧自己不设这两个变量）
+# ② 中文不乱码 + 输出实时刷盘（网关侧自己不设这两个变量）
 $env:PYTHONUTF8 = '1'; $env:PYTHONUNBUFFERED = '1'
 
-# ④ 先冒烟 20 秒：只看「文件下载权限是通的」那一行
+# ③ 先冒烟 20 秒：只看「文件下载权限是通的」那一行
 .\run-upgrade.ps1 -Probe -Seconds 20
 
-# ⑤ 正式跑：10 分钟自动退出，边跑边留档（中途要停就 Ctrl+C）
-.\run-upgrade.ps1 -Seconds 600 2>&1 | Tee-Object -FilePath $log
-Write-Host "日志 = $log"
+# ④ 正式跑：stdout / stderr 分两份文件 —— 别用 Tee-Object（中文 Windows 下必然乱码）
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$out = "D:\rehearsal-logs\demo-$stamp.out.log"   # ← 证据看这份，按 UTF-8 读
+$err = "D:\rehearsal-logs\demo-$stamp.err.log"   # 启动横幅 / 依赖 warning 在这份
+Start-Process -WindowStyle Hidden -FilePath 'powershell.exe' -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','D:\AI创新创业大赛\run-upgrade.ps1','-Seconds','3600' -WorkingDirectory 'D:\AI创新创业大赛' -RedirectStandardOutput $out -RedirectStandardError $err
+
+# ⑤ 记录人看这一份（实时跟随；Ctrl+C 只停看，不停网关）
+Get-Content -LiteralPath $out -Wait -Encoding UTF8
 ```
 
-- `-Seconds` 到点**自动退出**（省得跑完忘了关窗口 ⇒ 后面 U2 动盘时被进程锁挡住）。
+- **硬规则 ①：别用 `Tee-Object`。** 中文 Windows 下 PowerShell 会按自己的编码解码子进程输出 ⇒ **必然乱码**（`recv` / `-> ok` 行会变成看不懂的字符，那一轮证据就废了）。要走流式留档，就用上面 `Start-Process -RedirectStandardOutput / -RedirectStandardError` 的写法（`-RedirectStandardOutput` 不经 PowerShell 的解码链）。
+- **硬规则 ②：`recv` / `-> ok` 行在 stdout（`.out.log`），启动横幅 / 依赖 warning 在 stderr（`.err.log`）** ⇒ **判证据只看 `.out.log`**；`.err.log` 只在排查「进程起不来」时看。
+- **硬规则 ③：原始日志不许覆盖。** 文件名**必须带时间戳**（上面 `$stamp`）；**永远不要**让第二次跑把第一次的日志截掉 —— 已经吃过一次（重启把日志截成 **1038 B**，那一轮的静默证据就没了）。重跑 = 新文件，旧文件留着。
+- `-Seconds` 到点**自动退出**（省得跑完忘了关 ⇒ 后面动盘时被进程锁挡住）；`Start-Process` 起的是**隐藏窗口**，中途要停就 `Stop-Process -Id <pid> -Force`（pid 从 ①② 那两行或日志里拿）。
 - `-Echo` 只在 `-Probe` 下有效 —— 网关侧不认 `--echo`（不带 `-Probe` 传它必 `exit 2`）。
-- **硬规则：原始日志不许覆盖。** 文件名**必须带时间戳**（上面 `$stamp` 那段），或退一步用 `-Append` + 先写一行分隔标记；**永远不要**让第二次跑把第一次的日志截掉 —— 今天已经吃过一次（重启把日志截成 **1038 B**，那一轮的静默证据就没了）。重跑 = 新文件，旧文件留着。
-- 关窗口前先确认 `$log` 有内容；收工要按下面第 4 条贴进证据文件。
+- 收工前先确认 `$out` 有内容（`Get-Item $out`）；收工要按下面第 4 条贴进证据文件。
+
 2. 用**独立测试群**（「机器人007」的那个群），私聊用你自己的账号。
 3. **判"静默"的唯一方法**：日志里**只有 `recv`、没有 `-> … ok` 那一行**。别靠"群里没看到"判断。
-4. 记录人把网关窗口的输出**整段留着**（一会儿要贴进证据文件）。
+4. 记录人把 §0 那份 `.out.log` **整段留着**（一会儿要贴进证据文件）；**别贴 `.err.log`**。
 5. 下面每一格都记下**时间戳**（HH:MM:SS），写结论时要对齐日志。
 
 **收工后**：日志贴进新证据文件 `docs\evidence\2026-09-18-rehearsal.md`，形态照 `docs\evidence\2026-09-16-u1-smoke-real-device.md`

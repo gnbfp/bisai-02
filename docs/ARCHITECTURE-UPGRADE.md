@@ -954,3 +954,8 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 >   - ② **9/18 彩排清单（`docs\REHEARSAL-0918.md`）从「三格」扩到「五格」**：新增**格 D**（按人归属的 3 条私聊指令 —— `报告` / `完成 T3` / `我想提议：`，补 `docs\ACCEPTANCE-U2.md` §2 只跑了 2 条的缺口）与**格 E**（T01–T13 回归执行记录表 + 6 处口径改写的理由 = §12.5 那一项）；§4 收工加两条对应勾选。
 >   - ③ **格 B4 补一条来源说明**（T05 = U2 真机验收 §5 只跑正面之后的遗留）—— 格 B4 **早就在清单里**，这轮只补「为什么必须跑」。
 >   - ④ **彩排清单加时效注**：U2 已落地 ⇒ 原「必须赶在 U2 动盘之前」只对预 U2 那批成立（穿透批已跑）；`data-upgrade\workspaces\` 现在是运行时真数据域，不再当「待重建环境」。
+> - 2026-09-17 **v1.31（彩排清单 §0 起法换掉 `Tee-Object`）**：
+>   - ① **问题**：§0 原写 `run-upgrade.ps1 … 2>&1 | Tee-Object -FilePath $log` —— 中文 Windows 下 PowerShell 按自己的编码解码子进程输出 ⇒ **必然乱码**，`recv` / `-> ok` 行读不出来（判「静默」就靠它）。
+>   - ② **改法**：换成 `Start-Process … -RedirectStandardOutput $out -RedirectStandardError $err`（stdout / stderr 分两份带时间戳的文件），记录人 `Get-Content -LiteralPath $out -Wait -Encoding UTF8` 跟随。
+>   - ③ **两条硬规则进 §0**：**别用 `Tee-Object`**；**`recv` / `-> ok` 在 stdout（`.out.log`）、启动横幅在 stderr（`.err.log`）⇒ 判证据只看 `.out.log`**。（§0 原有的「原始日志不许覆盖」保留，编号变成硬规则 ③。）
+>   - ④ **连带订正**：清单头部「记录人必须盯着网关窗口的 stdout」→「盯着 §0 那份 `.out.log`」——`Start-Process -WindowStyle Hidden` 之后**没有窗口可盯**。
