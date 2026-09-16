@@ -139,8 +139,12 @@ def reply(inbound: Inbound, text: str) -> Reply:
     return Reply(chat_id=inbound.chat_id, text=text)
 
 
-def to_inbound(data) -> Inbound:
-    """飞书事件对象 → ``Inbound``（只取字段，不依赖 lark 的类型）。"""
+def to_inbound(data, bot_open_id: str = "") -> Inbound:
+    """飞书事件对象 → ``Inbound``（只取字段，不依赖 lark 的类型）。
+
+    ``bot_open_id`` = 机器人自己的 open_id（``FEISHU_BOT_OPEN_ID``）：**兜底判据** ——
+    平台没给 ``mentioned_type`` 时，@ 到自己的 open_id 也算"在跟我说话"（PM 2026-09-16 认）。
+    """
     event = getattr(data, "event", None)
     message = getattr(event, "message", None)
     sender = getattr(event, "sender", None)
@@ -170,13 +174,14 @@ def to_inbound(data) -> Inbound:
                 key=getattr(mention, "key", "") or "",
                 open_id=getattr(getattr(mention, "id", None), "open_id", "") or "",
                 name=getattr(mention, "name", "") or "",
-                is_bot=_is_bot_mention(mention),
+                is_bot=_is_bot_mention(mention, bot_open_id),
             )
             for mention in (getattr(message, "mentions", None) or [])
         ),
         # 只要有一个 @ 落在机器人身上，这条群消息就算"在跟机器人说话"（§4.5 第 5 步）
         bot_mentioned=any(
-            _is_bot_mention(mention) for mention in (getattr(message, "mentions", None) or [])
+            _is_bot_mention(mention, bot_open_id)
+            for mention in (getattr(message, "mentions", None) or [])
         ),
         sender_open_id=getattr(getattr(sender, "sender_id", None), "open_id", "") or "",
         sender_type=getattr(sender, "sender_type", "") or "",
@@ -186,15 +191,22 @@ def to_inbound(data) -> Inbound:
     )
 
 
-def _is_bot_mention(mention) -> bool:
-    """这一下 @ 的是机器人吗？判据 = 平台字段 ``mentioned_type == "bot"``。
+def _is_bot_mention(mention, bot_open_id: str = "") -> bool:
+    """这一下 @ 的是机器人吗？两个判据**取或**：
 
-    探针实测平台会给（`docs/evidence/2026-09-15-upgrade-instance-probe.md` §2 第 4 条），
-    但代码此前没读它 —— U1 的门禁需要这个字段（§4.5「缺口」）。
-    **认不出来就当不是**：那样这条消息会被门禁静默。这是有意的偏保守选择，
-    @ 识别率与"平台没给 mentioned_type"的兜底形态属未验证项（§4.6）。
+    ① 平台字段 ``mentioned_type == "bot"``（探针实测会给，见证据 §2 第 4 条）；
+    ② **兜底**：``open_id == bot_open_id``（机器人自己的 ``FEISHU_BOT_OPEN_ID``）——
+       平台没给 ``mentioned_type`` 时（老事件 / 字段缺失）仍然认得出（PM 2026-09-16 认）。
+
+    没配 ``bot_open_id`` 时 ② 不生效，**认不出来就当不是** —— 偏保守是有意的：
+    漏判只是少回一句，误判会让机器人乱插嘴。
     """
-    return str(getattr(mention, "mentioned_type", "") or "").strip().lower() == "bot"
+    if str(getattr(mention, "mentioned_type", "") or "").strip().lower() == "bot":
+        return True
+    if not bot_open_id:
+        return False
+    open_id = str(getattr(getattr(mention, "id", None), "open_id", "") or "")
+    return open_id == bot_open_id
 
 
 def _post_text(payload: dict) -> str:

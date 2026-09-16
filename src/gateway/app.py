@@ -143,7 +143,7 @@ class Gateway:
     def on_event(self, data) -> None:
         """回调绝不能被业务异常搞崩 —— 崩了长连接还在，但消息就静默丢了。"""
         try:
-            self.handle(to_inbound(data))
+            self.handle(to_inbound(data, bot_open_id=self.config.feishu_bot_open_id))
         except Exception as exc:
             print(
                 f"[M0] 处理事件出错（已忽略）：{type(exc).__name__}: {exc}", file=sys.stderr
@@ -384,9 +384,11 @@ class Gateway:
         except ExtractError as exc:
             self._send(reply(inbound, replies.EXTRACT_REJECTED.format(reason=exc)))
         except LLMError:
-            self._send(reply(inbound, replies.PARSE_FAILED))
+            self._send(reply(inbound, replies.parse_failed(inbound.chat_type)))
         except Exception as exc:                      # 兜底也要说话
-            self._send(reply(inbound, f"{replies.PARSE_FAILED}（{type(exc).__name__}）"))
+            self._send(
+                reply(inbound, f"{replies.parse_failed(inbound.chat_type)}（{type(exc).__name__}）")
+            )
         finally:
             if kind == "assignment":
                 pending = (state or {}).get("pending_file") or {}

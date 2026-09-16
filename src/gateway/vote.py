@@ -125,7 +125,7 @@ def command(
     """
     if not has_rubric:
         # D-48 口径：没有评分点就不生成，不烧 token
-        return Outcome(replies=(reply(inbound, replies.NEEDS_RUBRIC),))
+        return Outcome(replies=(reply(inbound, replies.needs_rubric(inbound.chat_type)),))
     members = list(getattr(roster, "members", None) or ())
     if not members:
         return Outcome(replies=(reply(inbound, replies.VOTE_NEED_ROSTER),))

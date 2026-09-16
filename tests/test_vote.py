@@ -109,7 +109,7 @@ def test_group_direction_acks_and_starts_the_pipeline():
 
 def test_direction_without_rubric_does_not_start_the_pipeline():
     outcome = route(_inbound("方向"), {}, _roster(), has_rubric=False, now=OPEN)
-    assert _texts(outcome) == [replies.NEEDS_RUBRIC]
+    assert _texts(outcome) == [replies.NEEDS_RUBRIC_GROUP]
     assert outcome.pipeline == ""
 
 

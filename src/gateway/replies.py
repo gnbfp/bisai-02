@@ -10,6 +10,12 @@ U5 的四层（§11.2，可机械检查）：
   ③ 群消息 ≤4 行、私聊 ≤6 行，更长的内容进报告 / 图片；
   ④ 短、直、不修辞：不卖萌、不"您 / 请知悉 / 已受理"、不连发感叹号。
 
+**群聊文案自带「@我」**（U1 门禁的连带影响）：凡是教用户"回某个词"的话，群里那版必须
+写成"@我 …" —— 门禁在群里没 @ 就静默，否则机器人自己教的动作会被自己的门禁吃掉
+（§9.1 第 4/5 条）。目前按此分叉的是 `作业书` 的清单行与 `FILE_MISSING` /
+`PARSE_FAILED` / `NEEDS_RUBRIC`（后面三个走 `file_missing()` / `parse_failed()` /
+`needs_rubric()` 取，调用方必须传 `inbound.chat_type`）。
+
 指令清单**不写死条数**（D-76）：由 ``COMMANDS`` 表按作用域派生。当前派生结果 = 群 7 / 私聊 5 /
 路由 9 条；U4 的 3 条变更指令落地后自动变成 8 / 7 / 12，这里一个字都不用改。
 """
@@ -28,12 +34,18 @@ __all__ = [
     "command_list",
     "FILE_RECEIVED",
     "FILE_MISSING",
+    "FILE_MISSING_GROUP",
+    "file_missing",
+    "parse_failed",
+    "needs_rubric",
     "IMAGE_REJECTED",
     "PARSING",
     "PARSE_FAILED",
+    "PARSE_FAILED_GROUP",
     "EXTRACT_REJECTED",
     "DECOMPOSING",
     "NEEDS_RUBRIC",
+    "NEEDS_RUBRIC_GROUP",
     "NO_RUBRIC_FOUND",
     "VOTE_GENERATING",
     "VOTE_NEED_GROUP",
@@ -105,12 +117,28 @@ class Command:
     scopes: tuple[str, ...]           # 生效作用域：GROUP / DM
     line: str                         # 清单里那一行（序号由 command_list() 加）
 
+    # 群里那版文案（带「@我」）；``None`` = 与 ``line`` 同一份。
+    # 门禁只放行"@ 了机器人"的群文本，所以**群里教用户"回某个词"的话必须自带 @我** ——
+    # 否则机器人自己教的动作会被自己的门禁吃掉（§9.1 第 4 条，真机复现）。
+    group_line: str | None = None
+
     def usable_in(self, scope: str) -> bool:
         return scope in self.scopes
 
+    def line_for(self, scope: str) -> str:
+        """清单里那一行：群聊给带「@我」的版本，私聊给原版。"""
+        if scope == GROUP and self.group_line:
+            return self.group_line
+        return self.line
+
 
 COMMANDS = (
-    Command("作业书", (GROUP, DM), "发作业书文件给我，再回「作业书」—— 我抽评分点、拆任务卡"),
+    Command(
+        "作业书",
+        (GROUP, DM),
+        "发作业书文件给我，再回「作业书」—— 我抽评分点、拆任务卡",
+        group_line="把作业书发进群，再 @我 说「作业书」—— 我抽评分点、拆任务卡",
+    ),
     Command("拆解", (GROUP, DM), "回「拆解」，我拿现有评分点重拆一遍"),
     Command("方向", (GROUP,), "群里回「方向」，我出 2–3 个候选方向并开投票"),
     Command("你想做哪一块", (GROUP, DM), "回「你想做哪一块」，我发任务卡清单给你填志愿"),
@@ -125,7 +153,7 @@ COMMANDS = (
 def command_list(scope: str) -> str:
     """按作用域派生清单 —— 条数**不写死**，从 COMMANDS 数出来（D-76）。"""
     lines = [
-        f"{index}. {command.line}"
+        f"{index}. {command.line_for(scope)}"
         for index, command in enumerate(
             (item for item in COMMANDS if item.usable_in(scope)), start=1
         )
@@ -140,12 +168,34 @@ COMMAND_LIST_DM = command_list(DM)
 # ---- 作业书 / 拆解 主链路 ----
 FILE_RECEIVED = "《{name}》我拿到了，回「作业书」我就开始解析。"
 FILE_MISSING = "我手上还没有作业书文件。先把作业书发进来，再回一次「作业书」。"
+# 群里那版必须带「@我」：门禁在群里没 @ 就静默，教一句"再回一次「作业书」"
+# 等于教用户去撞门禁（§9.1 第 4 条：补一句"把作业书发进这个群，再 @我一次"）。
+FILE_MISSING_GROUP = "我手上还没有作业书文件。把作业书发进这个群，再 @我一次。"
+
+
+def file_missing(scope: str) -> str:
+    """按作用域取"没文件"那句 —— 群里带 @我，私聊保持原样（照 command_list() 的做法）。"""
+    return FILE_MISSING_GROUP if scope == GROUP else FILE_MISSING
+
+
+def parse_failed(scope: str) -> str:
+    """"没解析出来"那句：群里的重试动作同样要带 @我（§9.1 第 5 条）。"""
+    return PARSE_FAILED_GROUP if scope == GROUP else PARSE_FAILED
+
+
+def needs_rubric(scope: str) -> str:
+    """"还没评分点"那句：群里的重试动作同样要带 @我（§9.1 第 5 条）。"""
+    return NEEDS_RUBRIC_GROUP if scope == GROUP else NEEDS_RUBRIC
 IMAGE_REJECTED = "图片我读不了，作业书发 PDF 或 Word 文件给我。"
 PARSING = "收到，开始解析作业书，大概半分钟。"
 PARSE_FAILED = "这份作业书没解析出来。如果是拍照或扫描的，换成文字版再回一次「作业书」。"
+# 群里那版带「@我」：门禁在群里没 @ 就静默（§9.1 第 5 条，与 FILE_MISSING 同款）。
+PARSE_FAILED_GROUP = "这份作业书没解析出来。如果是拍照或扫描的，换成文字版，再 @我一次「作业书」。"
 EXTRACT_REJECTED = "这份文件我读不了：{reason}"
 DECOMPOSING = "收到，拿现有评分点重拆一遍，马上好。"
 NEEDS_RUBRIC = "现在还没有评分点。先把作业书发给我，再回一次「作业书」。"
+# 群里那版带「@我」：同上（§9.1 第 5 条）。
+NEEDS_RUBRIC_GROUP = "现在还没有评分点。把作业书发进群，再 @我一次「作业书」。"
 NO_RUBRIC_FOUND = (
     "这份文件里我没找到评分标准（就是「评分表」「成绩评定」那一节）。"
     "为了不瞎拆，我先停在这儿：确认一下作业书里有没有这一节，或者换一份带评分标准的。"

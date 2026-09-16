@@ -282,7 +282,14 @@ def _by_prefix(
         return _assignment(inbound, state, now)
     if text.startswith("拆解"):
         return Outcome(
-            replies=(reply(inbound, replies.DECOMPOSING if has_rubric else replies.NEEDS_RUBRIC),),
+            replies=(
+                reply(
+                    inbound,
+                    replies.DECOMPOSING
+                    if has_rubric
+                    else replies.needs_rubric(inbound.chat_type),
+                ),
+            ),
             pipeline="decompose" if has_rubric else "",
         )
     if text.startswith("方向"):
@@ -439,7 +446,8 @@ def remember_file(inbound: Inbound, state: dict, now: datetime | None = None) ->
 
 def _assignment(inbound: Inbound, state: dict, now: datetime | None = None) -> Outcome:
     if not _pending_file(state, now, inbound=inbound):
-        return Outcome(replies=(reply(inbound, replies.FILE_MISSING),))
+        # 文案按作用域取（群里那句要带「@我」）—— 别写死常量，门禁会吃掉群里的动作
+        return Outcome(replies=(reply(inbound, replies.file_missing(inbound.chat_type)),))
     return Outcome(replies=(reply(inbound, replies.PARSING),), pipeline="assignment")
 
 
@@ -448,7 +456,7 @@ def _pending_file(
 ) -> dict:
     """有没有**可用**的缓存文件 —— 唯一的入口，有效期（D-46）与会话（D-47）都在这里判。
 
-    过期、或不是**这个会话**发的文件，都当没有：调用方自然回既有的 ``FILE_MISSING``，
+    过期、或不是**这个会话**发的文件，都当没有：调用方自然回既有的 ``file_missing(scope)``，
     ``pipeline`` 也不会起。
 
     ``inbound`` 必须是 keyword-only：``now`` 是第 2 个位置参数，写成位置参数的话

@@ -174,3 +174,29 @@ def test_to_inbound_tolerates_a_missing_mentioned_type():
 
 def test_bot_mentioned_defaults_to_false():
     assert Inbound(chat_id="c1").bot_mentioned is False
+
+
+def test_to_inbound_falls_back_to_the_bot_open_id():
+    """兜底（PM 2026-09-16 认）：平台没给 ``mentioned_type`` 时认 open_id == FEISHU_BOT_OPEN_ID。
+
+    上面 test_to_inbound_tolerates_a_missing_mentioned_type 是**没配**这个兜底时的行为；
+    配了之后同一件事要能认出来（命门：@ 识别率直接决定群聊门禁放不放行）。
+    """
+    data = _event(
+        content='{"text": "@_user_1 拆解"}',
+        mentions=[_mention("@_user_1", "ou_bot", "机器人")],      # 故意不带 mentioned_type
+    )
+    inbound = to_inbound(data, bot_open_id="ou_bot")
+    assert inbound.bot_mentioned is True
+    assert inbound.mentions[0].is_bot is True
+
+
+def test_the_bot_open_id_fallback_does_not_match_other_people():
+    """兜底不能变成"谁都算机器人"：@ 的是别人时照样 False。"""
+    data = _event(
+        content='{"text": "@_user_1 登记"}',
+        mentions=[_mention("@_user_1", "ou_zhang", "张三")],
+    )
+    inbound = to_inbound(data, bot_open_id="ou_bot")
+    assert inbound.bot_mentioned is False
+    assert inbound.mentions[0].is_bot is False

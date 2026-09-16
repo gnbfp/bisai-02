@@ -25,9 +25,17 @@ def _inbound(text="", **over):
         message_id="m1",
     )
     data.update(over)
-    # U1 门禁：群聊默认"@ 了机器人"—— 升级后这是群里的常态；测门禁本身的用例自己传 False
+    # U1 门禁：群聊默认"@ 了机器人"—— 升级后这是群里的常态；测门禁本身的用例自己传 False。
+    # 这个默认**偏宽**（"不是私聊就算被 @"不是安全默认）：门禁本身由
+    # test_the_register_form_is_taken_before_the_mention_gate 与各条 bot_mentioned=False
+    # 的用例钉住，别把"用例是绿的"当成门禁还在。
     data.setdefault("bot_mentioned", data["chat_type"] != "p2p")
     return Inbound(**data)
+
+
+def _nobody(text="", **over):
+    """群里**没 @ 机器人**的一条 —— 门禁会静默它，用来钉"谁排在门禁前面"。"""
+    return _inbound(text, bot_mentioned=False, **over)
 
 
 def _texts(outcome):
@@ -167,7 +175,7 @@ def _pending(minutes_ago: int) -> dict:
 def test_stale_pending_file_is_ignored():
     """隔了一场再发「作业书」，不该静默复用上一场的文件（D-46）。"""
     outcome = route(_inbound("作业书"), {"pending_file": _pending(31)}, None, now=NOW)
-    assert _texts(outcome) == [replies.FILE_MISSING]
+    assert _texts(outcome) == [replies.FILE_MISSING_GROUP]
     assert outcome.pipeline == ""
 
 
@@ -199,7 +207,7 @@ def test_a_file_cached_in_another_chat_is_not_used():
     outcome = route(
         _inbound("作业书", chat_id="c_me"), _cached_in("c_someone_else"), None, now=NOW
     )
-    assert _texts(outcome) == [replies.FILE_MISSING]
+    assert _texts(outcome) == [replies.FILE_MISSING_GROUP]
     assert outcome.pipeline == ""
 
 
@@ -221,7 +229,8 @@ def test_pending_file_without_chat_id_stays_usable():
 
 
 def test_assignment_without_pending_file_asks_for_it():
-    assert _texts(route(_inbound("作业书"), {}, None)) == [replies.FILE_MISSING]
+    # 群里那句要带「@我」：不然机器人教的动作会被自己的门禁吃掉（§9.1 第 4 条）
+    assert _texts(route(_inbound("作业书"), {}, None)) == [replies.FILE_MISSING_GROUP]
 
 
 def test_assignment_with_pending_file_acks_and_leaves_state():
@@ -232,7 +241,9 @@ def test_assignment_with_pending_file_acks_and_leaves_state():
 
 
 def test_decompose_without_rubric_points_to_assignment():
-    assert _texts(route(_inbound("拆解"), {}, None, has_rubric=False)) == [replies.NEEDS_RUBRIC]
+    assert _texts(route(_inbound("拆解"), {}, None, has_rubric=False)) == [
+        replies.NEEDS_RUBRIC_GROUP
+    ]
 
 
 def test_decompose_with_rubric_acks():
@@ -242,7 +253,7 @@ def test_decompose_with_rubric_acks():
 def test_direction_without_rubric_points_to_assignment():
     """M2：没有评分点就不生成候选（D-48 口径），也不起重活。"""
     outcome = route(_inbound("方向"), {}, None, has_rubric=False)
-    assert _texts(outcome) == [replies.NEEDS_RUBRIC]
+    assert _texts(outcome) == [replies.NEEDS_RUBRIC_GROUP]
     assert outcome.pipeline == ""
 
 
@@ -416,8 +427,8 @@ def test_collect_stage_lets_plain_commands_through():
     修之前：发一次「登记」不填表，全群的指令都被吃掉、且永不超时。
     """
     state = {"awaiting": "register", "register": {"stage": "collect", "expires_at": None}}
-    assert _texts(route(_inbound("方向"), state, None)) == [replies.NEEDS_RUBRIC]
-    assert _texts(route(_inbound("作业书"), state, None)) == [replies.FILE_MISSING]
+    assert _texts(route(_inbound("方向"), state, None)) == [replies.NEEDS_RUBRIC_GROUP]
+    assert _texts(route(_inbound("作业书"), state, None)) == [replies.FILE_MISSING_GROUP]
     assert _texts(route(_inbound("今天天气不错"), state, None)) == [replies.COMMAND_LIST_TEXT]
     # 有缓存文件时照常干活：窗口不吃指令
     with_file = {**state, "pending_file": {"file_key": "fk_1", "message_id": "m0"}}
@@ -476,7 +487,7 @@ _FORM_MENTIONS = (
 def test_initiator_command_with_mention_is_not_parsed_as_a_form():
     """真机复现：窗口里发起人发「@机器人 方向」被回成「表单里「组长」要正好 1 个人」。"""
     outcome = route(_inbound("@_user_1 方向", mentions=_AT), _window(), None)
-    assert _texts(outcome) == [replies.NEEDS_RUBRIC]
+    assert _texts(outcome) == [replies.NEEDS_RUBRIC_GROUP]
     assert outcome.state is None                      # 窗口不动
 
 
@@ -484,13 +495,13 @@ def test_stranger_command_with_mention_is_not_swallowed():
     """真机复现：窗口里旁人发「@机器人 方向」一个字都不回（最恶劣）。"""
     inbound = _inbound("@_user_1 方向", mentions=_AT, sender_open_id="ou_stranger")
     outcome = route(inbound, _window(), None)
-    assert _texts(outcome) == [replies.NEEDS_RUBRIC]
+    assert _texts(outcome) == [replies.NEEDS_RUBRIC_GROUP]
     assert outcome.state is None
 
 
 def test_initiator_command_without_mention_still_passes_through():
     """对照：同一句不带 @ 一直是正常的。"""
-    assert _texts(route(_inbound("方向"), _window(), None)) == [replies.NEEDS_RUBRIC]
+    assert _texts(route(_inbound("方向"), _window(), None)) == [replies.NEEDS_RUBRIC_GROUP]
 
 
 def test_stranger_form_is_silent_and_does_not_advance():
@@ -503,6 +514,20 @@ def test_initiator_form_still_works():
     """防回归：真填表必须照旧推进到 confirm。"""
     outcome = route(_inbound(_FORM, mentions=_FORM_MENTIONS), _window(), None)
     assert outcome.state["register"]["stage"] == "confirm"
+
+
+def test_the_register_form_is_taken_before_the_mention_gate():
+    """门禁顺序回归（审核 P1）：**登记状态机排在 @ 门禁之前**。
+
+    表单 @ 的是组员、不会 @ 机器人（D-34：open_id 只从 @ 结构里取）⇒ 门禁若挡在登记
+    状态机前面，第二步会被静默吃掉、登记永远停在第一步。这条用例故意走 `_nobody()`
+    （群聊、`bot_mentioned=False`）：把 `may_speak()` 挪到 register 分支之前它立刻变红 ——
+    而 register 窗口的其他用例全走 `_inbound()` 的默认（群聊默认"被 @"），挪回去照样全绿。
+    """
+    inbound = _nobody(_FORM, mentions=_FORM_MENTIONS)
+    outcome = route(inbound, _window(), None)
+    assert outcome.state["register"]["stage"] == "confirm"
+    assert outcome.state["register"]["leader"]["open_id"] == "ou_a"
 
 
 def test_register_command_inside_the_window_shows_the_form_again():

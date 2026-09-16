@@ -17,6 +17,7 @@ DEFAULT_ENV_FILE = REPO_ROOT / ".env"
 
 ENV_FEISHU_APP_ID = "FEISHU_APP_ID"
 ENV_FEISHU_APP_SECRET = "FEISHU_APP_SECRET"
+ENV_FEISHU_BOT_OPEN_ID = "FEISHU_BOT_OPEN_ID"
 ENV_LLM_API_KEY = "LLM_API_KEY"
 ENV_LLM_BASE_URL = "LLM_BASE_URL"
 ENV_LLM_MODEL = "LLM_MODEL"
@@ -62,6 +63,8 @@ def _attr_of(env_name: str) -> str:
 class Config:
     feishu_app_id: str = ""
     feishu_app_secret: str = ""
+    # 机器人自己的 open_id：@ 识别的兜底判据（不是密钥，可以与 app_id 一起出现在 repr）
+    feishu_bot_open_id: str = ""
     llm_api_key: str = ""
     llm_base_url: str = ""
     llm_model: str = ""
@@ -73,6 +76,7 @@ class Config:
             "Config("
             f"feishu_app_id={_mask(self.feishu_app_id)}, "
             f"feishu_app_secret={_mask(self.feishu_app_secret)}, "
+            f"feishu_bot_open_id={self.feishu_bot_open_id!r}, "
             f"llm_api_key={_mask(self.llm_api_key)}, "
             f"llm_base_url={self.llm_base_url!r}, "
             f"llm_model={self.llm_model!r}, "
@@ -109,6 +113,7 @@ def load_config(env_file: Path | None = None, *, data_dir: Path | None = None) -
     return Config(
         feishu_app_id=get(ENV_FEISHU_APP_ID),
         feishu_app_secret=get(ENV_FEISHU_APP_SECRET),
+        feishu_bot_open_id=get(ENV_FEISHU_BOT_OPEN_ID),
         llm_api_key=get(ENV_LLM_API_KEY),
         llm_base_url=get(ENV_LLM_BASE_URL),
         llm_model=get(ENV_LLM_MODEL),

@@ -147,3 +147,28 @@ def test_no_double_parenthesis_stacking_per_line():
         if any(pattern.search(line) for line in text.splitlines())
     ]
     assert hits == []
+
+
+def test_the_group_version_teaches_the_mention():
+    """群里教动作必须自带「@我」：门禁在群里没 @ 就静默（§9.1 第 4 条）。
+
+    修之前：群清单第 1 条写"再回「作业书」"、`FILE_MISSING` 也没带 @ ——
+    机器人自己教的动作会被自己的门禁吃掉（真机：群里投完 PDF 再发不带 @ 的
+    「作业书」，一个字都不回）。
+    """
+    group_first = replies.command_list(replies.GROUP).splitlines()[1]
+    dm_first = replies.command_list(replies.DM).splitlines()[1]
+
+    assert "@我" in group_first
+    assert "@我" not in dm_first                        # 私聊不套 @ 规则（L5）
+    assert "@我" not in replies.COMMAND_LIST_DM
+
+    # 四处按作用域分叉的文案：群里那版必须带「@我」，私聊那版一个字都不许有
+    for render, dm_text in (
+        (replies.file_missing, replies.FILE_MISSING),
+        (replies.parse_failed, replies.PARSE_FAILED),
+        (replies.needs_rubric, replies.NEEDS_RUBRIC),
+    ):
+        assert render(replies.DM) == dm_text, render
+        assert "@我" not in dm_text, render
+        assert "@我" in render(replies.GROUP), render

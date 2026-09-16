@@ -269,7 +269,7 @@ def test_llm_failure_degrades_with_a_human_message(env):
 
     gateway.handle(_inbound("作业书"))
 
-    assert sender.texts[1] == replies.PARSE_FAILED
+    assert sender.texts[1] == replies.PARSE_FAILED_GROUP
     assert "pending_file" not in store.load_state()
 
 
@@ -639,7 +639,7 @@ def test_direction_pipeline_without_rubric_says_so(env):
 
     gateway.handle(_inbound("方向"))
 
-    assert sender.texts == [replies.NEEDS_RUBRIC]
+    assert sender.texts == [replies.NEEDS_RUBRIC_GROUP]
     assert store.load_state().get("awaiting") is None
 
 
@@ -1123,7 +1123,7 @@ def test_m3_failure_keeps_the_previous_snapshot(env):
     gateway.handle(_inbound("作业书"))
 
     assert sender.texts[0] == replies.PARSING
-    assert sender.texts[-1] == replies.PARSE_FAILED
+    assert sender.texts[-1] == replies.PARSE_FAILED_GROUP
     # M1 的产物不能在 M3 失败时单独留下来：三份全是旧的
     assert [p.id for p in store.load_rubric()] == ["R_old"]
     assert [c.task_id for c in store.load_cards()] == ["T_seed"]
