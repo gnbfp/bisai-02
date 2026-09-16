@@ -125,6 +125,9 @@ def render_board(
 
     ``preferences=None`` = "调用方没给志愿数据" ⇒ 不渲染未交志愿那行；
     传空列表 ``[]`` = "确认没人交" ⇒ 全员都列进未交志愿。
+
+    回流池（§8.3：``assignee == ""``）**单独一行「待认领」** —— 它是某个人名下的
+    反例，混进任何人的行都是错的；不渲染的话退出的卡会从总表上凭空消失（U4）。
     """
     members = list(getattr(roster, "members", None) or ())
     by_person: dict[str, list[AssignmentRecord]] = {m.open_id: [] for m in members}
@@ -141,6 +144,10 @@ def render_board(
             continue
         lines.append(f"{label} → " + "/ ".join(_card_label(r, show_completion) for r in mine))
         best.append(min(mine, key=lambda r: _SOURCE_ORDER.get(r.source, 9)).source)
+
+    pool = by_person.get("") or []
+    if pool:
+        lines.append("待认领 → " + "/ ".join(_card_label(r, show_completion) for r in pool))
 
     if show_completion:
         # M7 的一列"完成/未完成"（§3.1）：卡级状态在每行卡上标，这里给个总账

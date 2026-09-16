@@ -265,3 +265,17 @@ def test_a_card_missing_from_the_existing_list_is_still_allocated():
 
     assert _pairs(result) == [("T1", "ou_a", "volunteer_1"), ("T2", "ou_b", "auto")]
 
+
+def test_the_board_lists_pool_cards_apart_from_people():
+    """§8.3：回流池（`assignee == ""`）单列「待认领」，不许混进任何人的行。"""
+    board = render_board(
+        [
+            AssignmentRecord(task_id="T1", assignee="ou_b", source="volunteer_1"),
+            AssignmentRecord(task_id="T2", assignee="", source="auto"),
+        ],
+        [_card("T1"), _card("T2")],
+        _roster(),
+    )
+
+    assert "待认领 → T2" in board
+    assert all("T2" not in line for line in board.splitlines() if line.startswith("李四"))

@@ -218,7 +218,7 @@ def _display(open_id: str, roster: Roster | None) -> str:
     for member in getattr(roster, "members", None) or ():
         if member.open_id == open_id and member.name:
             return member.name
-    return (open_id[:8] if open_id else "未分配")
+    return (open_id[:8] if open_id else "待认领")           # §8.3：空负责人 = 回流池
 
 
 def _label(bar: Bar, roster: Roster | None) -> str:
