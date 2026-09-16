@@ -218,3 +218,50 @@ def test_board_can_show_completion_on_demand():
 
     plain = render_board(assignments, cards, roster)
     assert "已完成" not in plain and "完成 1/2 张" not in plain
+
+
+# ---------- §8.4 / §8.2 v1.8：结算只填"没人负责"的卡 ----------
+
+
+def test_settling_never_moves_a_card_that_already_has_an_owner():
+    """§8.4 的核心回归：组长改派过的卡，重跑结算不许回到原负责人手上。"""
+    cards = [_card("T1"), _card("T2")]
+    roster = _roster(2)
+    fixed = [AssignmentRecord("T1", "ou_b", "leader")]          # 改派：T1 -> 李四
+    prefs = [_want("ou_a", ["T1"], "2026-09-13T10:00:00")]      # 张三还想抢 T1
+
+    result = allocate(cards, roster, prefs, existing=fixed)
+
+    assert _pairs(result) == [("T1", "ou_b", "leader"), ("T2", "ou_a", "auto")]
+
+
+def test_a_fixed_card_keeps_its_completion_stamp():
+    """固定下来的记录**原样带过去**：``completed_at`` 是执行期证据（D-67）。"""
+    cards = [_card("T1")]
+    fixed = [AssignmentRecord("T1", "ou_a", "leader", "2026-09-14T09:00:00")]
+
+    result = allocate(cards, _roster(2), [], existing=fixed)
+
+    assert result[0].completed_at == "2026-09-14T09:00:00"
+    assert result[0].source == "leader"
+
+
+def test_a_released_card_joins_the_fallback_again():
+    """§8.3：回流池 = ``assignee == ""`` 的那条记录 —— 它重新参与兜底，不是被丢弃。"""
+    cards = [_card("T1"), _card("T2", hours=5.0)]
+    released = [AssignmentRecord("T1", "", "volunteer_1")]
+
+    result = allocate(cards, _roster(2), [], existing=released)
+
+    assert _pairs(result) == [("T1", "ou_a", "auto"), ("T2", "ou_b", "auto")]
+
+
+def test_a_card_missing_from_the_existing_list_is_still_allocated():
+    """新作业书多出来的卡：不在 ``existing`` 里也照常走志愿 / 兜底（只新增卡）。"""
+    cards = [_card("T1"), _card("T2")]
+    existing = [AssignmentRecord("T1", "ou_a", "volunteer_1")]
+
+    result = allocate(cards, _roster(2), [], existing=existing)
+
+    assert _pairs(result) == [("T1", "ou_a", "volunteer_1"), ("T2", "ou_b", "auto")]
+

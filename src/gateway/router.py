@@ -220,13 +220,17 @@ def route(
             # 先结算，但**不提前 return**：这条消息本身若是指令（「完成 T1」「拆解」），
             # 结算之后还要照原路走一遍（同 M2 收口，必修 A）—— 否则窗口一过期，
             # 当事人那句「完成 T1」就永远落不了盘（F3）。
-            closing = preference.settle(state, cards, roster, preferences, now)
+            closing = preference.settle(
+                state, cards, roster, preferences, now, existing=assignments
+            )
             if closing is not None and closing.state is not None:
                 state = closing.state             # 结算带回的已清状态
             else:
                 state = preference.clear(state)   # 结不了（没认下群）：清残留，别卡住 awaiting
         elif block:
-            hit = preference.accept(text, inbound, state, cards, roster, preferences, now)
+            hit = preference.accept(
+                text, inbound, state, cards, roster, preferences, now, existing=assignments
+            )
             if hit is not None:
                 return hit
         return _with_closing(
@@ -306,7 +310,14 @@ def _by_prefix(
         return vote.human_command(text, inbound, state, roster, direction, now)
     if text.startswith("你想做哪一块"):
         return preference.command(
-            inbound, state, cards, roster, preferences, now, source_title=source_title
+            inbound,
+            state,
+            cards,
+            roster,
+            preferences,
+            now,
+            source_title=source_title,
+            existing=assignments,
         )
     if any(text.startswith(prefix) for prefix in PROPOSAL_PREFIXES):
         return _proposal(text, inbound, state, roster, now, group_chat_id=group_chat_id)

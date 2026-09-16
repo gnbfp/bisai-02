@@ -39,19 +39,32 @@ def allocate(
     cards: Sequence[TaskCard],
     roster: Roster | None,
     preferences: Sequence[Preference],
+    existing: Sequence[AssignmentRecord] = (),
 ) -> list[AssignmentRecord]:
-    """``任务卡 × 花名册 × 志愿`` → 分配结果（按任务卡顺序返回）。**纯函数。**"""
+    """``任务卡 × 花名册 × 志愿`` → 分配结果（按任务卡顺序返回）。**纯函数。**
+
+    ``existing`` = 盘上现成的分配（§8.4 裁决）：**已有人负责的卡固定不动**，只对
+    「没有负责人」的卡（未分配 + 回流）做志愿匹配与兜底 —— 否则人工改派 / 认领 /
+    完成标记会被下一次结算冲掉（`_save_assignments()` 的整份覆盖是同一根病）。
+    固定下来的记录**原样带过去**：`source` / `completed_at` 都是执行期证据（D-67）。
+    """
     cards = list(cards or ())
     members = list(getattr(roster, "members", None) or ())
     member_ids = [m.open_id for m in members]
     known = set(member_ids)
     by_id = {card.task_id: card for card in cards}
 
+    # 已分配的卡先占住位置：志愿匹配与兜底都只看得见「空着的卡」。
+    chosen: dict[str, AssignmentRecord] = {
+        record.task_id: record
+        for record in (existing or ())
+        if record.task_id in by_id and record.assignee
+    }
+
     # 花名册外的人不进分配：旧花名册的残留志愿、陌生人私聊都会在这里被滤掉（D-53）
     ranked = [p for p in (preferences or ()) if p.user_id in known]
     ranked.sort(key=lambda p: p.submitted_at or "")      # 先到先得（同刻按文件顺序，稳定排序）
 
-    chosen: dict[str, AssignmentRecord] = {}
     for preference in ranked:
         picked = _first_free(preference, chosen, by_id)
         if picked is None:

@@ -317,21 +317,38 @@ class Gateway:
         )
 
     def _save_assignments(self, store: JsonStore, payloads) -> None:
-        """整份分配结果一次性覆盖（M4 结算，§6.4）。
+        """M4 结算：**只填没人负责的卡 / 只新增卡**，不整份覆盖（§8.2 v1.8 / §8.4）。
 
-        ``completed_at`` 是执行期的证据，不能因为重开一次志愿窗口就归零（D-67）——
-        覆盖前按 ``task_id`` 把旧的完成时间合并回来，**但只在负责人没变时**：
-        卡换了人，新负责人的"完成"不该继承前任的。
+        结算曾是这条链上唯一没有读-改-写保护的地方（``save_assignments()`` 整份覆盖）
+        ⇒ 人工改派 / 认领 / 完成标记会被下一次结算冲掉。现在走 ``mutate_many()`` 的
+        锁内读-改-写，逐条判：
+
+          * 卡不在盘上 → **新增**（新作业书多出来的卡）；
+          * 盘上那张**没有负责人**（未分配 / 回流）→ 填上负责人与来源；
+          * 盘上那张**已有人负责** → **一个字都不动**（人工修订 / 执行期证据优先，D-67）。
+
+        ``completed_at`` 因此天然保住：改过人的卡根本不会走到这里被覆盖。
         """
-        previous = {r.task_id: r for r in (store.load_assignments() or ())}
-        merged = []
+        incoming: dict[str, AssignmentRecord] = {}
         for payload in payloads:
             record = AssignmentRecord.from_dict(payload)
-            old = previous.get(record.task_id)
-            if not record.completed_at and old is not None and old.assignee == record.assignee:
-                record = replace(record, completed_at=old.completed_at)
-            merged.append(record)
-        store.save_assignments(merged)
+            incoming[record.task_id] = record
+
+        def merge(items: list) -> list:
+            new_items = list(items)
+            for index, record in enumerate(new_items):
+                fresh = incoming.get(record.task_id)
+                if fresh is not None and not record.assignee:
+                    new_items[index] = replace(
+                        record, assignee=fresh.assignee, source=fresh.source
+                    )
+            known = {record.task_id for record in new_items}
+            new_items.extend(
+                record for task_id, record in incoming.items() if task_id not in known
+            )
+            return new_items
+
+        store.mutate_many(ASSIGNMENTS, AssignmentRecord, merge)
 
     def _save_proposal(self, store: JsonStore, payload: dict) -> None:
         """追加一条提议 —— **含真实 ``user_id``**，这是防滥用留痕（§6.5）。

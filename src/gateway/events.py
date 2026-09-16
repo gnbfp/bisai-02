@@ -110,7 +110,8 @@ class Outcome:
 
     下面三个是 M4 / M5 的落盘请求（都只是**数据**，写盘归 app 层），形状照 ``save_roster``：
       * ``save_preference``：一条志愿（按 ``user_id`` 覆盖写，M4 收志愿）；
-      * ``save_assignments``：整份分配结果（M4 结算，一次性覆盖）；
+      * ``save_assignments``：M4 结算的分配结果 —— **增量语义**（§8.2 v1.8 / §8.4）：
+        只填没人负责的卡、只新增卡，已有人负责的卡一个字都不动；
       * ``save_proposal``：一条匿名提议（M5，追加写，含真实 ``user_id`` 留痕）；
       * ``save_direction``：整份方向结果（M2 落定，一次性覆盖，裸 JSON）；
       * ``save_complete``：M6 的完成标记（``{task_id, completed_at}``，只改那一条）；

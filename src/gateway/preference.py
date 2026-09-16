@@ -30,7 +30,7 @@ from typing import Sequence
 
 from src.gateway import allocation, replies
 from src.gateway.events import Inbound, Outcome, Reply, reply
-from src.models import Preference, Roster, TaskCard
+from src.models import AssignmentRecord, Preference, Roster, TaskCard
 
 __all__ = [
     "PREFERENCE_TTL",
@@ -79,6 +79,7 @@ def command(
     preferences: Sequence[Preference],
     now: datetime | None = None,
     source_title: str = "",
+    existing: Sequence[AssignmentRecord] = (),
 ) -> Outcome:
     """「你想做哪一块」：群里=开窗口 / 重发；私聊=只回他自己那份清单（§2.1 / D-56）。"""
     cards = list(cards or ())
@@ -97,7 +98,7 @@ def command(
     block, expired = read_window(state, now)
     if block and expired:
         # 第 2 条：超时 → 当场结算（失效与封盘是同一个动作，D-52）
-        settled = settle(state, cards, roster, preferences, now)
+        settled = settle(state, cards, roster, preferences, now, existing=existing)
         if settled is not None:
             return settled
         state = clear(state)                     # 结不了（还没认下群）：清掉窗口，重新开
@@ -168,6 +169,7 @@ def accept(
     roster: Roster | None,
     preferences: Sequence[Preference],
     now: datetime | None = None,
+    existing: Sequence[AssignmentRecord] = (),
 ) -> Outcome | None:
     """窗口开着时的一条消息：**是志愿就处理，不是志愿返回 ``None``**（交回 7 条前缀）。
 
@@ -176,7 +178,7 @@ def accept(
     if inbound.chat_type == "group" and (text or "").strip() == SEAL_WORD:
         # 「封盘」在本状态机内消费（P0-B / D-56），不进 7 条前缀。只认组长。
         if inbound.sender_open_id == getattr(roster, "leader", None):
-            settled = settle(state, cards, roster, preferences, now)
+            settled = settle(state, cards, roster, preferences, now, existing=existing)
             if settled is not None:
                 return settled
             return Outcome(state=clear(state))   # 结不了（没认下群）：至少别把卡住的窗口留着
@@ -211,7 +213,9 @@ def accept(
     result = Outcome(replies=tuple(out), save_preference=preference.to_dict())
     if _all_submitted(preferences, inbound.sender_open_id, roster):
         # 第 1 条结算触发：花名册全员都交过 → 立刻封盘，不等满 5 小时
-        settled = settle(state, cards, roster, [*(preferences or ()), preference], now)
+        settled = settle(
+            state, cards, roster, [*(preferences or ()), preference], now, existing=existing
+        )
         if settled is not None:
             return Outcome(
                 replies=(*out, *settled.replies),
@@ -228,8 +232,13 @@ def settle(
     roster: Roster | None,
     preferences: Sequence[Preference],
     now: datetime | None = None,
+    existing: Sequence[AssignmentRecord] = (),
 ) -> Outcome | None:
-    """结算：分配 + 总表发群 + 关窗口。**结不了就返回 ``None``**，绝不让总表无声消失。"""
+    """结算：分配 + 总表发群 + 关窗口。**结不了就返回 ``None``**，绝不让总表无声消失。
+
+    ``existing`` 一路传给 ``allocation.allocate()``（§8.4）：已分配的卡固定不动 ⇒
+    人工改派 / 认领 / 完成标记不会被下一次结算冲掉。
+    """
     cards = list(cards or ())
     members = list(getattr(roster, "members", None) or ())
     block = dict((state or {}).get("preference") or {})
@@ -237,7 +246,7 @@ def settle(
     group = block.get("chat_id") or (state or {}).get("group_chat_id") or ""
     if not cards or not members or not group:
         return None
-    assignments = allocation.allocate(cards, roster, preferences)
+    assignments = allocation.allocate(cards, roster, preferences, existing=existing)
     return Outcome(
         replies=(
             Reply(

@@ -1054,8 +1054,13 @@ def test_a_failed_gantt_is_reported_in_the_group(env):
     assert gateway.sender.texts == [replies.IMAGE_SEND_FAILED]
 
 
-def test_resettling_keeps_completed_at_only_for_the_same_assignee(env):
-    """必修 B / D-67：重开志愿窗口不能把完成标记清零；换人则不继承前任的。"""
+def test_resettling_never_moves_a_card_that_already_has_an_owner(env):
+    """§8.4 / D-67：结算只填没人负责的卡 —— 已分配的卡（连同完成标记）一个字都不动。
+
+    旧口径是"整份覆盖 + 负责人没变时合回 ``completed_at``"（D-67）；§8.4 把语义改成
+    "已分配的卡固定不动、只对未分配 / 回流兜底" ⇒ 负责人根本不会变，
+    ``completed_at`` 因此是**结构上**保住的，不靠事后合并。
+    """
     gateway, store, sender, _ = env
     store.save_assignments(
         [
@@ -1082,7 +1087,80 @@ def test_resettling_keeps_completed_at_only_for_the_same_assignee(env):
 
     records = {r.task_id: r for r in store.load_assignments()}
     assert records["T1"].completed_at == "2026-09-14T09:00:00"   # 负责人没变 -> 保留
-    assert records["T2"].completed_at is None                    # 换人了 -> 丢掉
+    assert records["T2"].assignee == "ou_a"                      # 结算想换人：不允许
+    assert records["T2"].completed_at == "2026-09-14T09:30:00"   # 连标记一起不动
+
+
+def test_settling_fills_only_the_cards_without_an_owner(env):
+    """§8.2 v1.8：结算 = 只填空负责人 / 只新增卡 —— 改派结果与完成标记都不许被冲掉。"""
+    gateway, store, sender, _ = env
+    store.save_assignments(
+        [
+            AssignmentRecord(
+                task_id="T1", assignee="ou_b", source="leader",
+                completed_at="2026-09-14T09:00:00",
+            ),                                  # 组长改派过 + 已标完成
+            AssignmentRecord(task_id="T2", assignee="", source="volunteer_1"),   # 回流卡
+        ]
+    )
+
+    gateway._deliver(
+        Outcome(
+            save_assignments=(
+                {"task_id": "T1", "assignee": "ou_a", "source": "volunteer_1"},
+                {"task_id": "T2", "assignee": "ou_a", "source": "auto"},
+            )
+        ),
+        store,
+    )
+
+    records = {r.task_id: r for r in store.load_assignments()}
+    assert (records["T1"].assignee, records["T1"].source) == ("ou_b", "leader")
+    assert records["T1"].completed_at == "2026-09-14T09:00:00"
+    assert (records["T2"].assignee, records["T2"].source) == ("ou_a", "auto")
+    assert records["T2"].completed_at is None
+
+
+def test_settling_adds_a_card_that_is_not_on_disk_yet(env):
+    """新作业书多出来的卡（盘上没有）→ 新增；不是整份覆盖，盘上别的卡照留。"""
+    gateway, store, sender, _ = env
+    store.save_assignments(
+        [AssignmentRecord(task_id="T1", assignee="ou_a", source="volunteer_1")]
+    )
+
+    gateway._deliver(
+        Outcome(
+            save_assignments=(
+                {"task_id": "T1", "assignee": "ou_a", "source": "volunteer_1"},
+                {"task_id": "T9", "assignee": "ou_b", "source": "auto"},
+            )
+        ),
+        store,
+    )
+
+    records = {r.task_id: r for r in store.load_assignments()}
+    assert set(records) == {"T1", "T9"}
+    assert records["T9"].assignee == "ou_b"
+
+
+def test_settling_writes_nothing_when_the_result_is_already_on_disk(env):
+    """§8.2 v1.8 的条件写：结算结果与盘上一模一样 ⇒ 一个字节都不写（mtime 不动）。"""
+    gateway, store, sender, _ = env
+    store.save_assignments(
+        [AssignmentRecord(task_id="T1", assignee="ou_a", source="volunteer_1")]
+    )
+    before = (store.root / "assignments.json").read_bytes()
+
+    gateway._deliver(
+        Outcome(
+            save_assignments=(
+                {"task_id": "T1", "assignee": "ou_a", "source": "volunteer_1"},
+            )
+        ),
+        store,
+    )
+
+    assert (store.root / "assignments.json").read_bytes() == before
 
 
 def _seed_due_task(store, hours=30):
