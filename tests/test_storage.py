@@ -101,6 +101,45 @@ def test_mutate_raw_for_state(store):
     assert store.load_state() == {"awaiting": "vote"}
 
 
+def _fingerprint(*paths):
+    """字节 + mtime + 大小：条件写要证明的是"根本没动过这份文件"。"""
+    return [(p.read_bytes(), p.stat().st_mtime_ns, p.stat().st_size) for p in paths]
+
+
+def test_mutate_writes_nothing_when_the_value_is_unchanged(store):
+    """9/17 补丁批 ③（§8.2 v1.8 条件写）：新值 == 旧值 ⇒ **不写盘**（字节与 mtime 都不动）。"""
+    store.save_state({"awaiting": None, "seen": ["m1"]})
+    store.save_rubric([RubricPoint(id="R1", quote="原文", observable="可核对")])
+    state_path = store.root / storage.STATE
+    rubric_path = store.root / storage.RUBRIC
+    before = _fingerprint(state_path, rubric_path)
+
+    same_state = store.mutate_raw(storage.STATE, lambda payload: payload, default={})
+    same_rubric = store.mutate_many(storage.RUBRIC, RubricPoint, lambda items: items)
+
+    assert same_state == {"awaiting": None, "seen": ["m1"]}       # 值照样原样返回
+    assert [p.id for p in same_rubric] == ["R1"]
+    assert _fingerprint(state_path, rubric_path) == before
+
+
+def test_mutate_does_not_materialize_a_missing_file_without_a_change(store):
+    """文件不存在 + 值还是 `default`（fn 原样返回）⇒ 也不凭空造一份出来。"""
+    store.mutate_raw(storage.STATE, lambda payload: payload, default={})
+    assert not (store.root / storage.STATE).exists()
+
+
+def test_mutate_still_writes_when_the_value_changes(store):
+    """条件写不许过火：真变了就必须落盘（防"幂等"把正常写入一起吃掉）。"""
+    store.save_state({"awaiting": None})
+    path = store.root / storage.STATE
+    before = path.read_bytes()
+
+    store.mutate_raw(storage.STATE, lambda payload: {**payload, "awaiting": "vote"}, default={})
+
+    assert path.read_bytes() != before
+    assert store.load_state() == {"awaiting": "vote"}
+
+
 def test_corrupt_json_raises_instead_of_guessing(store):
     (store.root / storage.CARDS).write_text("{不是合法 JSON", encoding="utf-8")
     with pytest.raises(json.JSONDecodeError):

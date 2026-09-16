@@ -8,6 +8,9 @@
   2. 读-改-写一律走 `mutate()`，由一把**进程级** RLock 串行化。
      锁必须是进程级的、不能每个实例一把 —— 否则 M0 回调线程、worker 线程、
      M6 定时线程各自 new 一个 store，就等于根本没上锁。
+  3. 读-改-写**值没变就不落盘**（`_write_if_changed_unlocked()`，锁内序列化比较）。
+     重放同一份内容不再刷新 mtime —— 免得"没改也写"给监控 / 增量同步添噪声，
+     也省掉每个 worker 每轮一次无意义的整份原子替换（§8.2 v1.8 的条件写）。
 
 `state.json` / `proposals.json` 只提供裸读写入口：它们的字段 requirements.md
 没有定义，按 §8 的规矩不臆想，等拍板后再补类型（见 src/models.py 末尾）。
@@ -71,6 +74,11 @@ UPLOADS = "uploads"
 _GLOBAL_LOCK = threading.RLock()
 
 
+def _dumps(payload: Any) -> str:
+    """落盘文本的**唯一**生成处：缩进 2 + 结尾换行（`json.dumps` 的参数只写这一遍）。"""
+    return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+
 class JsonStore:
     """`data/` 的唯一入口。任何模块都不许绕过它直接开文件。"""
 
@@ -98,10 +106,24 @@ class JsonStore:
         self.root.mkdir(parents=True, exist_ok=True)
         p = self.path(name)
         tmp = p.with_name(p.name + ".tmp")
-        tmp.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
+        tmp.write_text(_dumps(payload), encoding="utf-8")
         os.replace(tmp, p)                 # 原子替换
+
+    def _write_if_changed_unlocked(self, name: str, payload: Any, old_text: str) -> bool:
+        """锁内**序列化比较**：与旧值逐字节相同就不写盘，返回"有没有写"。
+
+        比较在锁内（与落盘之间没有第二个线程插进来的窗口），比的是"将来会落盘的那串
+        字节"（`_dumps()`），所以是整份内容级的一致，不是某个字段级的一致。
+
+        `old_text` 必须是**调用 fn 之前**量下来的快照，不能传旧对象让这里现算：`fn` 常
+        写成原地改（`state["awaiting"] = ...; return state`），那时新值与旧值是同一个
+        对象，事后比就永远"没变"、更新直接丢。
+        """
+        text = _dumps(payload)
+        if text == old_text:
+            return False
+        self._write_unlocked(name, payload)
+        return True
 
     def read_raw(self, name: str, default: Any = None) -> Any:
         with self._lock:
@@ -114,12 +136,14 @@ class JsonStore:
     def mutate_raw(self, name: str, fn: Callable[[Any], Any], default: Any = None) -> Any:
         """裸 JSON 的原子读-改-写。用于 state.json / proposals.json（类型未定）。
 
-        `fn(payload)` 返回新 payload；抛异常则**不写盘**。
+        `fn(payload)` 返回新 payload；抛异常则**不写盘**；返回的新值与旧值一模一样也
+        **不写盘**（条件写）—— 文件还不存在、值仍是 `default` 时同样不凭空造一份。
         """
         with self._lock:
             payload = self._read_unlocked(name, default)
+            old_text = _dumps(payload)          # fn 可能原地改 payload，所以先量
             new_payload = fn(payload)
-            self._write_unlocked(name, new_payload)
+            self._write_if_changed_unlocked(name, new_payload, old_text)
             return new_payload
 
     def mutate_many(self, name: str, model: type, fn: Callable[[list], list]) -> list:
@@ -127,14 +151,18 @@ class JsonStore:
 
         这是 M4 收志愿、M6 写 completed_at 要用的原语：同一份文件被两个线程
         同时改时，必须走这里，否则就是丢更新。
+
+        `fn` 一条也没改动（比如要改的卡不在文件里）⇒ 不落盘（条件写，同 `mutate_raw`）；
+        但 `validate()` 照跑 —— 校验是入参契约，与写不写盘无关。
         """
         with self._lock:
             raw = self._read_unlocked(name, []) or []
+            old_text = _dumps(raw)              # 同上：items 由 raw 构造，fn 可能原地改
             items = [model.from_dict(item) for item in raw]
             new_items = fn(items)
             for item in new_items:
                 item.validate()
-            self._write_unlocked(name, [item.to_dict() for item in new_items])
+            self._write_if_changed_unlocked(name, [item.to_dict() for item in new_items], old_text)
             return new_items
 
     def ensure_dirs(self) -> None:
