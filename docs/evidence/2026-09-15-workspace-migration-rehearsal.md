@@ -52,6 +52,7 @@ MVP `data\` 的 SHA256（前 16 位）：
 
 - 守卫：先 `Resolve-Path` 校验目标落在 `data-upgrade\_rehearsal\` 之内，不满足即中止（防止误删）
 - 删除工作空间副本 + `index.json` ⇒ 两者均确认不存在
+- **2026-09-16 补注（清理）**：回退时留下的空目录 `data-upgrade\_rehearsal\workspaces\` 已连同 `_rehearsal\` 一并删除（审核 #2 补丁 3；纯清洁，无数据影响）。
 - **回退后复核：MVP `data\` 10 个已存在文件（13 个候选名里 3 个尚未产生：`assignments.json` / `proposals.json` / `reminders.json`）哈希前后完全一致 = True**
 
 ## 5. 这份演练证明了什么 / 没证明什么
