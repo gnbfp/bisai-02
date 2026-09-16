@@ -17,11 +17,13 @@ import pytest
 
 from tools.migrate_workspace import (
     REPO_ROOT,
+    EXIT_LOCKED,
     GuardError,
     Locked,
     OutOfScope,
     check_process_lock,
     guard_within,
+    main,
     migrate,
     resolve_path,
     rollback,
@@ -262,6 +264,29 @@ def test_process_lock_blocks_a_live_pid(tmp_path):
         migrate(src, dest, apply=True)
     assert not (dest / "workspaces").exists()
     assert check_process_lock(dest, force=True), "--force 要能跳过阻断并留一句说明"
+
+
+def test_rollback_refuses_while_the_upgrade_process_is_running(tmp_path, capsys):
+    """回退也会删副本 / 改索引 ⇒ 进程在跑就必须 exit=4，且**一个字节都不动**。
+
+    与 `migrate()` 同一条纪律（§3.3 第 1 步）：真机形态就是"忘了停升级版就回退"。
+    `--force` 仍是唯一的越权口（照 migrate 的现成开关走，不新增第二个说法）。
+    """
+    src = make_source(tmp_path)
+    dest = _dest(tmp_path)
+    migrate(src, dest, apply=True)
+    _write(dest / "app.lock", {"pid": os.getpid(), "started_at": "2026-09-17T09:30:00", "port": 47654})
+    before = tree_digest(dest)
+
+    argv = ["--source-root", str(src), "--dest-root", str(dest), "--rollback"]
+    assert main(argv) == EXIT_LOCKED
+    assert "升级版进程还在跑" in capsys.readouterr().err
+    assert tree_digest(dest) == before, "锁在就不许动盘"
+    assert (dest / "workspaces" / CHAT).is_dir(), "锁在就不许删副本"
+    assert CHAT in (json.loads((dest / "index.json").read_text(encoding="utf-8")).get("workspaces") or {})
+
+    assert main(argv + ["--force"]) == 0, "--force 要能跳过阻断（与 migrate 同款）"
+    assert not (dest / "workspaces" / CHAT).exists()
 
 
 def test_rollback_removes_workspace_and_keeps_source(tmp_path):

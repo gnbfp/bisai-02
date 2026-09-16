@@ -770,12 +770,18 @@ def rollback(
     dest_root: Path | str = DEFAULT_DEST,
     *,
     chat_id: str = "",
+    force: bool = False,
     now: datetime | None = None,
 ) -> dict:
-    """§3.3 第 7 步：回退 = 删副本 + 删索引条目。源根只读，所以回退无数据风险。"""
+    """§3.3 第 7 步：回退 = 删副本 + 删索引条目。源根只读，所以回退无数据风险。
+
+    回退照样**删副本 / 改索引** ⇒ 与 `migrate()` 同一条纪律：升级版进程还在跑就不许动盘
+    （§3.3 第 1 步）。检查点放在任何写之前，拦下就是**一个字节都没动**。
+    """
     now = now or datetime.now()
     stamp = now.strftime("%Y%m%d-%H%M%S")
     src_root, dest_root_real = guard_roots_disjoint(source_root, dest_root)
+    lock_note = check_process_lock(dest_root_real, force=force)
 
     key = str(chat_id or "").strip()
     if not key:
@@ -804,6 +810,7 @@ def rollback(
         "source_root": str(src_root),
         "dest_root": str(dest_root_real),
         "chat_id": key,
+        "lock": lock_note,
         "workspace_dir": str(ws_dir),
         "manifest_path": str(dest_root_real / MIGRATION_DIR / f"MANIFEST-rollback-{stamp}.json"),
     }
@@ -906,7 +913,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.rollback:
-            manifest = rollback(args.source_root, args.dest_root, chat_id=args.chat_id)
+            manifest = rollback(args.source_root, args.dest_root, chat_id=args.chat_id, force=args.force)
         else:
             manifest = migrate(args.source_root, args.dest_root, apply=args.apply, force=args.force)
     except Locked as exc:
