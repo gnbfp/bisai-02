@@ -96,7 +96,10 @@ def exempt(
     block, _ = read_window(state, now)
     if not block or block.get("closed"):
         return False
-    group = block.get("chat_id") or (state or {}).get("group_chat_id") or ""
+    # U2 / 对齐卡 #7：窗口的归属**只认块里的 chat_id** —— `open_window()` 落的块总带它，
+    # 原先那条 `or state["group_chat_id"]` 回退是死代码；留着等于让全局单值（U2 起降为
+    # 只读）继续对投票生效。缺 chat_id ⇒ 不豁免（宁静静默）。
+    group = block.get("chat_id") or ""
     if not group or inbound.chat_type != "group" or inbound.chat_id != group:
         return False
     if not inbound.sender_open_id:
@@ -277,7 +280,8 @@ def accept(
     if not block:
         return None
     stripped = (text or "").strip()
-    group = block.get("chat_id") or (state or {}).get("group_chat_id") or ""
+    # U2 / 对齐卡 #7：同 `exempt()` —— 归属只认块里的 chat_id，缺了就不算票。
+    group = block.get("chat_id") or ""
     in_window = bool(group) and inbound.chat_type == "group" and inbound.chat_id == group
     seal = _is_seal(stripped)
     numbers = _parse_numbers(stripped)

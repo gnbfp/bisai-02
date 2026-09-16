@@ -548,6 +548,30 @@ def test_opening_a_vote_window_clears_register_and_preference_residue():
     assert outcome.state["awaiting"] == "vote"
 
 
+def test_a_window_block_without_chat_id_neither_exempts_nor_counts():
+    """U2 / 对齐卡 #7：`chat_id` 是窗口归属的**唯一**真源，缺了就不豁免、不算票。
+
+    现状（改之前）会回退读全局 `state.group_chat_id` ⇒ 这条孤儿块照样能豁免、照样计票；
+    而 `open_window()` 落的块总带 `chat_id`，所以那个回退是死代码 —— 拆掉它，U2 才能把
+    全局单值降成"只读、停更"。
+    """
+    orphan = {
+        "awaiting": "vote",
+        "group_chat_id": GROUP,                  # 故意留着：新口径下它不该再影响判定
+        "vote": {
+            "opened_at": OPEN.isoformat(timespec="seconds"),
+            "opened_by": LEADER,
+            "candidates": [dict(item) for item in CANDIDATES],
+            "votes": {},
+        },
+    }
+
+    assert not vote.exempt("2", _inbound("2", sender_open_id="ou_li"), orphan, _roster(), OPEN)
+    consumed = vote.accept("2", _inbound("2", sender_open_id="ou_li"), orphan, _roster(), OPEN)
+    assert consumed is not None and not consumed.replies, "裸数字：静默不计，也不交回前缀"
+    assert consumed.save_direction is None and consumed.state is None, "不动票、不动盘"
+
+
 def test_preference_window_clears_vote_residue():
     state = _state()
     outcome = route(
