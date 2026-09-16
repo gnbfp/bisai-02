@@ -21,7 +21,8 @@ Get-Content -LiteralPath .\data-upgrade\app.lock -ErrorAction SilentlyContinue
 # ② 日志放仓库外：仓库里的运行日志可能带凭据（.gitignore 明令不入库），且仓库外不会被系统清理
 $logDir = 'D:\rehearsal-logs'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-$log = Join-Path $logDir 'u1_0918.log'
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$log   = Join-Path $logDir "u1_0918-$stamp.log"   # 每次一个新文件 —— 绝不覆盖上一轮
 
 # ③ 中文不乱码 + 日志实时刷盘（网关侧自己不设这两个变量）
 $env:PYTHONUTF8 = '1'; $env:PYTHONUNBUFFERED = '1'
@@ -36,6 +37,7 @@ Write-Host "日志 = $log"
 
 - `-Seconds` 到点**自动退出**（省得跑完忘了关窗口 ⇒ 后面 U2 动盘时被进程锁挡住）。
 - `-Echo` 只在 `-Probe` 下有效 —— 网关侧不认 `--echo`（不带 `-Probe` 传它必 `exit 2`）。
+- **硬规则：原始日志不许覆盖。** 文件名**必须带时间戳**（上面 `$stamp` 那段），或退一步用 `-Append` + 先写一行分隔标记；**永远不要**让第二次跑把第一次的日志截掉 —— 今天已经吃过一次（重启把日志截成 **1038 B**，那一轮的静默证据就没了）。重跑 = 新文件，旧文件留着。
 - 关窗口前先确认 `$log` 有内容；收工要按下面第 4 条贴进证据文件。
 2. 用**独立测试群**（「机器人007」的那个群），私聊用你自己的账号。
 3. **判"静默"的唯一方法**：日志里**只有 `recv`、没有 `-> … ok` 那一行**。别靠"群里没看到"判断。
