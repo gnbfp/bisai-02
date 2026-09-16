@@ -34,7 +34,7 @@ def _inbound(text="", **over):
 
 
 def _nobody(text="", **over):
-    """群里**没 @ 机器人**的一条 —— 门禁会静默它，用来钉"谁排在门禁前面"。"""
+    """群里**没 @ 机器人**的一条（U1 的常态输入）—— 门禁会静默它，也用来钉"谁排在门禁前面"。"""
     return _inbound(text, bot_mentioned=False, **over)
 
 
@@ -730,11 +730,6 @@ def _preference_state(group="c1"):
         "group_chat_id": group,
         "preference": {"chat_id": group, "opened_at": NOW.isoformat(timespec="seconds")},
     }
-
-
-def _nobody(text, **over):
-    """一条**没 @** 的群消息（U1 的常态输入）。"""
-    return _inbound(text, bot_mentioned=False, **over)
 
 
 def test_group_text_without_a_mention_is_silent():

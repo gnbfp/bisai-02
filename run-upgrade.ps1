@@ -9,6 +9,8 @@
 #   启动：.\run-upgrade.ps1
 #   探针：.\run-upgrade.ps1 -Probe                验证权限 / 文件下载是否通
 #   限时：.\run-upgrade.ps1 -Probe -Seconds 20    跑 20 秒自动退出（看结果用）
+#   回执：.\run-upgrade.ps1 -Probe -Echo          探针额外回一句话（顺带验发送权限）
+#         —— -Echo 只在 -Probe 下生效：--echo 由 tools\probe_feishu.py 认，网关侧不认
 #   停止：网关窗口按 Ctrl+C
 #
 # 它干三件事：
@@ -58,7 +60,10 @@ $loaded += 'DATA_DIR', 'GATEWAY_LOCK_PORT'
 
 $extra = @()
 if ($Seconds -gt 0) { $extra += @('--seconds', "$Seconds") }
-if ($Echo)          { $extra += '--echo' }
+# -Echo 只在探针下有意义：'--echo' 是 tools\probe_feishu.py 的参数，
+# src\gateway\app.py 的 argparse 认不出它（不带 -Probe 时透传 ⇒ 启动必 exit 2）。
+# 网关侧要新的开关就另开一个参数，别复用这个。
+if ($Echo -and $Probe) { $extra += '--echo' }
 $argv = @($extra) + @($args)
 
 try {
