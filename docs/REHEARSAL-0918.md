@@ -9,8 +9,34 @@
 
 ## 0. 前置（5 分钟）
 
-1. 起升级版：`.\run-upgrade.ps1`（读 `.env.upgrade`，数据根 `data-upgrade\`，锁端口 47654）。
-   想顺带验权限就先跑 `.\run-upgrade.ps1 -Probe -Seconds 20`。
+1. **起升级版**（照抄这段；参数别自己发明）——两个窗口：一个跑网关，一个记日志。
+
+```powershell
+cd D:\AI创新创业大赛
+
+# ① 清场确认：上一轮进程 / 锁文件（pid 还在 ⇒ 先把那个窗口关掉）
+Get-Process python -ErrorAction SilentlyContinue | Select-Object Id, StartTime
+Get-Content -LiteralPath .\data-upgrade\app.lock -ErrorAction SilentlyContinue
+
+# ② 日志放仓库外：仓库里的运行日志可能带凭据（.gitignore 明令不入库），且仓库外不会被系统清理
+$logDir = 'D:\rehearsal-logs'
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$log = Join-Path $logDir 'u1_0918.log'
+
+# ③ 中文不乱码 + 日志实时刷盘（网关侧自己不设这两个变量）
+$env:PYTHONUTF8 = '1'; $env:PYTHONUNBUFFERED = '1'
+
+# ④ 先冒烟 20 秒：只看「文件下载权限是通的」那一行
+.\run-upgrade.ps1 -Probe -Seconds 20
+
+# ⑤ 正式跑：10 分钟自动退出，边跑边留档（中途要停就 Ctrl+C）
+.\run-upgrade.ps1 -Seconds 600 2>&1 | Tee-Object -FilePath $log
+Write-Host "日志 = $log"
+```
+
+- `-Seconds` 到点**自动退出**（省得跑完忘了关窗口 ⇒ 后面 U2 动盘时被进程锁挡住）。
+- `-Echo` 只在 `-Probe` 下有效 —— 网关侧不认 `--echo`（不带 `-Probe` 传它必 `exit 2`）。
+- 关窗口前先确认 `$log` 有内容；收工要按下面第 4 条贴进证据文件。
 2. 用**独立测试群**（「机器人007」的那个群），私聊用你自己的账号。
 3. **判"静默"的唯一方法**：日志里**只有 `recv`、没有 `-> … ok` 那一行**。别靠"群里没看到"判断。
 4. 记录人把网关窗口的输出**整段留着**（一会儿要贴进证据文件）。
