@@ -34,6 +34,7 @@ from src.intelligence.direction import generate_directions
 from src.intelligence.extract import (
     ExtractError,
     check_deadline,
+    check_meta_fields,
     check_radical_residue,
     check_weight_sum,
     extract_text,
@@ -531,6 +532,7 @@ class Gateway:
                 check_weight_sum(parsed.points),
                 check_radical_residue(text),
                 check_deadline(parsed.meta),
+                check_meta_fields(parsed.meta),
             )
             if w
         ]
@@ -560,6 +562,7 @@ class Gateway:
                 check_weight_sum(parsed.points),
                 check_radical_residue(text),
                 check_deadline(parsed.meta),
+                check_meta_fields(parsed.meta),
             )
             if w
         ]
