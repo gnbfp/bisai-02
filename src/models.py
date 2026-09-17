@@ -83,6 +83,12 @@ class AssignmentMeta(_Base):
     占位值会污染 M6 催办 / M7 甘特图 / M8 基线，报告里按「未标注」显示。
     注意：deadline 的字符串格式文档没有定义，这里暂按 ISO 风格
     'YYYY-MM-DDTHH:MM' 存 —— 这属于待拍板项，别当成已定论。
+
+    course / title / submission **同样可为空**（2026-09-17 PM 拍 A）：U3 的典型
+    输入是「只有格式要求的指导书」，通篇没有课程名 / 提交物 —— 那是**文档的事实**，
+    不是模型的错，逼模型填满只会让它编：实测这份 DOCX 三次重试全挂在必填上，
+    群里只看到一句「没解析出来」（连工作量链路都走不到）。空值走
+    ``check_meta_fields()`` 软警告 + 报告按「未标注」显示，与 deadline 同款。
     """
 
     course: str
@@ -92,10 +98,11 @@ class AssignmentMeta(_Base):
     source_file: str
 
     def validate(self) -> None:
-        # deadline 不在必填里：允许空（D-49），空值交给 check_deadline() 出软警告
-        for name in ("course", "title", "submission", "source_file"):
-            if not getattr(self, name):
-                raise SchemaError(f"AssignmentMeta.{name} 不能为空")
+        # 只有 source_file 必填：它是**程序给的事实**（文件名），不靠 LLM 抽。
+        # deadline 允许空（D-49）；course / title / submission 允许空（2026-09-17 拍 A），
+        # 空值分别交给 check_deadline() / check_meta_fields() 出软警告。
+        if not self.source_file:
+            raise SchemaError("AssignmentMeta.source_file 不能为空")
 
 
 def parse_deadline(value) -> datetime | None:

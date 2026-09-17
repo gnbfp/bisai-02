@@ -9,7 +9,7 @@ from src.models import (
     RubricPoint,
     TaskCard,
 )
-from src.report.checklist import render_checklist
+from src.report.checklist import render_checklist, render_workload_checklist
 
 META = AssignmentMeta(
     course="编译原理",
@@ -135,3 +135,20 @@ def test_without_assignments_the_old_output_is_unchanged():
     result = DecomposeResult(cards=tuple(cards), failures=(), generations=2)
     text = render_checklist(META, points, cards, result)
     assert "负责人" not in text and "完成 " not in text
+
+
+def test_missing_meta_fields_are_shown_as_unlabeled():
+    """拍 A：course / title / submission 允许空 —— 但空档要显示成「未标注」，
+    两条链路的抬头都得是同一行（红线：逐位一致）。
+    """
+    meta = AssignmentMeta(
+        course="",
+        title="",
+        submission="",
+        deadline="",
+        source_file="指导书.docx",
+    )
+    result = DecomposeResult(cards=(), failures=(), generations=0)
+    expected = "《未标注》 未标注｜交付：未标注｜截止：未标注"
+    assert expected in render_checklist(meta, _points(), [], result)
+    assert expected in render_workload_checklist(meta, [], result)

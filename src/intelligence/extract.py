@@ -31,6 +31,7 @@ __all__ = [
     "extract_text",
     "check_weight_sum",
     "check_deadline",
+    "check_meta_fields",
     "normalize_cjk",
     "check_radical_residue",
 ]
@@ -298,3 +299,18 @@ def check_deadline(meta: AssignmentMeta | None) -> str | None:
     if not match or int(match.group(1)) < DEADLINE_MIN_YEAR:
         return f"截止时间 {raw!r} 很可能是占位值（原文没有明确日期），请对照原文核对"
     return None
+
+
+def check_meta_fields(meta: AssignmentMeta | None) -> str | None:
+    """元信息缺件软校验（2026-09-17 PM 拍 A）。返回警告文案；``None`` = 齐。
+
+    schema 放开 ``course / title / submission`` 之后，「只有格式要求、没有课程名」这类
+    文档（U3 的典型输入）不再卡在 M1 校验里重试到 ``LLMError``；但空值必须**明确
+    报出来**，否则清单抬头就是一个肉眼看不出的空档 —— 与 ``check_deadline()`` 同款：
+    **软警告、不拒收**。``source_file`` 不在此列：它是程序给的事实，仍然必填。
+    """
+    labels = (("course", "课程名"), ("title", "作业标题"), ("submission", "提交物"))
+    missing = [label for name, label in labels if not (getattr(meta, name, "") or "").strip()]
+    if not missing:
+        return None
+    return f"作业书里没读到{'/'.join(missing)}，报告按「未标注」显示"

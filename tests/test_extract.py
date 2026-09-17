@@ -11,12 +11,13 @@ from src.intelligence.extract import (
     TABLE_MARKER,
     ExtractError,
     check_deadline,
+    check_meta_fields,
     check_radical_residue,
     check_weight_sum,
     extract_text,
     normalize_cjk,
 )
-from src.models import AssignmentMeta, RubricPoint
+from src.models import AssignmentMeta, RubricPoint, SchemaError
 
 
 def _make_pdf(path, body, table):
@@ -219,6 +220,44 @@ def test_placeholder_deadline_warns():
 
 def test_real_deadline_is_silent():
     assert check_deadline(_meta("2026-06-30T00:00")) is None
+
+
+# ---------- 作业元信息缺件软校验（2026-09-17 PM 拍 A）----------
+
+
+def _meta_fields(course, title, submission):
+    return AssignmentMeta(
+        course=course,
+        title=title,
+        submission=submission,
+        deadline="2026-06-30T00:00",
+        source_file="指导书.docx",
+    )
+
+
+def test_empty_course_is_valid_and_warns():
+    """只有格式要求的指导书：填不出的字段允许空，但要软警告点名。"""
+    meta = _meta_fields("", "课程设计报告", "源码")
+    meta.validate()                          # 空 course 不再抛 SchemaError（拍 A）
+    warning = check_meta_fields(meta)
+    assert warning is not None
+    assert "课程名" in warning
+    assert "未标注" in warning
+
+
+def test_all_missing_meta_fields_are_named():
+    warning = check_meta_fields(_meta_fields("", "", ""))
+    assert "课程名" in warning and "作业标题" in warning and "提交物" in warning
+
+
+def test_complete_meta_is_silent():
+    assert check_meta_fields(_meta_fields("编译原理", "课程设计", "源码")) is None
+
+
+def test_source_file_is_still_required():
+    """程序给的事实（文件名）不许空 —— 这是唯一保留的必填。"""
+    with pytest.raises(SchemaError):
+        AssignmentMeta(course="", title="", submission="", deadline="", source_file="").validate()
 
 
 # ---------- CJK 部首归一化（D-43）----------

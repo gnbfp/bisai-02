@@ -23,6 +23,22 @@ from src.models import BALANCE_LIMIT, AssignmentMeta, AssignmentRecord, Roster, 
 __all__ = ["render_checklist", "render_workload_checklist"]
 
 
+def _meta_line(meta: AssignmentMeta) -> str:
+    """抬头那一行。**空字段不许显示成空档**（D-49 + 2026-09-17 拍 A）。
+
+    ``deadline`` 早就是「未标注」；``course / title / submission`` 允许空之后同样按
+    「未标注」显示 —— 肉眼看得见，才知道下一步该补什么。两条链路共用这一行。
+    """
+
+    def show(value: str) -> str:
+        return (value or "").strip() or "未标注"
+
+    return (
+        f"《{show(meta.title)}》 {show(meta.course)}"
+        f"｜交付：{show(meta.submission)}｜截止：{show(meta.deadline)}"
+    )
+
+
 def render_checklist(
     meta: AssignmentMeta,
     points: Sequence[RubricPoint],
@@ -44,10 +60,8 @@ def render_checklist(
     by_task = {record.task_id: record for record in (assignments or ())}
 
     coverage = coverage_loop(cards, points)
-    # 空 deadline 不许显示成空字符串 —— 肉眼看不出来（D-49）
-    deadline = (meta.deadline or "").strip() or "未标注"
     lines = [
-        f"《{meta.title}》 {meta.course}｜交付：{meta.submission}｜截止：{deadline}",
+        _meta_line(meta),
         "",
         "评分点核对清单",
     ]
@@ -133,10 +147,8 @@ def render_workload_checklist(
     （换的只是这一份清单里的那一段）。硬指标 = 工作量分布，**一个覆盖率数字都不出现**。
     """
     by_task = {record.task_id: record for record in (assignments or ())}
-    # 空 deadline 不许显示成空字符串 —— 肉眼看不出来（D-49）
-    deadline = (meta.deadline or "").strip() or "未标注"
     lines = [
-        f"《{meta.title}》 {meta.course}｜交付：{meta.submission}｜截止：{deadline}",
+        _meta_line(meta),
         "",
         "工作量核对清单（估算，可改）",
     ]
