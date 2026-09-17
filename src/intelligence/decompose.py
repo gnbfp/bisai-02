@@ -24,7 +24,7 @@ from src.intelligence.coverage import balance_loop, coverage_loop
 from src.intelligence.llm import LLMClient, LLMOutputError, as_number
 from src.models import BALANCE_LIMIT, RubricPoint, SchemaError, TaskCard
 
-__all__ = ["check", "decompose", "DecomposeResult", "M3_SYSTEM"]
+__all__ = ["check", "decompose", "DecomposeResult", "M3_SYSTEM", "find_cycle"]
 
 M3_SYSTEM = """你是小组作业机器人里的「M3 任务拆解」模块，唯一任务是把评分点清单拆成人能认领的任务卡。
 只输出 JSON 对象，不要解释、不要 markdown 代码块：
@@ -110,13 +110,13 @@ def check(cards: Sequence[TaskCard], rubric: Sequence[RubricPoint]) -> list[str]
             f"（max={balance.max_hours:g}h，min={balance.min_hours:g}h）"
         )
 
-    cycle = _find_cycle(cards)
+    cycle = find_cycle(cards)
     if cycle:
         failures.append(f"依赖成环：{' → '.join(cycle)}")
     return failures
 
 
-def _find_cycle(cards: Sequence[TaskCard]) -> list[str] | None:
+def find_cycle(cards: Sequence[TaskCard]) -> list[str] | None:
     """按 ``depends_on`` 构图找环（F4），返回环路径（如 ``[T1, T2, T1]``），无环则 ``None``。
 
     只看卡片之间的边：悬空 ID 已由 ``_validate_cards`` 挡下，自依赖也已由

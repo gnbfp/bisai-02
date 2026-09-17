@@ -161,19 +161,32 @@ class TaskCard(_Base):
     deliverable: str
     acceptance: str
     depends_on: list[str] = field(default_factory=list)
+    # U3（§6.4 (a)）：**无评分点链路**的溯源字段 —— 每卡非空，元素 = 原文段落引用 +
+    # 估算依据；有评分点链路留空。两条链路**至少填一个**，见 validate()。
+    source_refs: list[str] = field(default_factory=list)
 
     def validate(self) -> None:
         if not self.task_id:
             raise SchemaError("TaskCard.task_id 不能为空")
-        if not self.rubric_refs:
+        # U3（§6.4 采用 (a)）：放宽"rubric_refs 必填非空"为**按链路二选一** ——
+        # 有评分点链路必须 rubric_refs 非空（T02 的溯源硬校验不松，`decompose` 那一侧
+        # 另有一条更严的校验），无评分点链路必须 source_refs 非空。两头都空 = 沒有溯源。
+        if not self.rubric_refs and not self.source_refs:
             raise SchemaError(
-                f"TaskCard({self.task_id}): rubric_refs 是必填溯源字段，不能为空"
+                f"TaskCard({self.task_id}): 溯源字段不能两头都空 —— 有评分点链路填 "
+                "rubric_refs，无评分点链路填 source_refs（§6.4 (a)）"
             )
         for ref in self.rubric_refs:
             if not isinstance(ref, str):
                 raise SchemaError(
                     f"TaskCard({self.task_id}): rubric_refs 只存 id 字符串（D-03），"
                     f"得到 {type(ref).__name__}；原文引用只在展示时 join"
+                )
+        for ref in self.source_refs:
+            if not isinstance(ref, str) or not ref.strip():
+                raise SchemaError(
+                    f"TaskCard({self.task_id}): source_refs 只存非空字符串"
+                    "（原文段落引用 + 估算依据）"
                 )
         if self.effort_hours < EFFORT_HOURS_FLOOR:
             raise SchemaError(
