@@ -20,7 +20,7 @@ from src.intelligence.coverage import balance_loop, coverage_loop
 from src.intelligence.decompose import DecomposeResult
 from src.models import BALANCE_LIMIT, AssignmentMeta, AssignmentRecord, Roster, RubricPoint, TaskCard
 
-__all__ = ["render_checklist"]
+__all__ = ["render_checklist", "render_workload_checklist"]
 
 
 def render_checklist(
@@ -116,3 +116,50 @@ def _name(open_id: str, roster: Roster | None) -> str:
         if member.open_id == open_id and member.name:
             return member.name
     return (open_id[:8] if open_id else "待认领")           # §8.3：空负责人 = 回流池
+
+
+def render_workload_checklist(
+    meta: AssignmentMeta,
+    cards: Sequence[TaskCard],
+    result: DecomposeResult,
+    *,
+    assignments: Sequence[AssignmentRecord] = (),
+    roster: Roster | None = None,
+) -> str:
+    """U3 **无评分点链路**的核对清单（§6.2 / §6.6）。
+
+    与 ``render_checklist()`` 的分工：**只把"评分点核对 + 覆盖率"换成"工作量估算"**，
+    抬头 / 交付 / 截止 / 负责人 / 完成那几列照旧 —— M7 的分配总表与甘特图也照旧
+    （换的只是这一份清单里的那一段）。硬指标 = 工作量分布，**一个覆盖率数字都不出现**。
+    """
+    by_task = {record.task_id: record for record in (assignments or ())}
+    # 空 deadline 不许显示成空字符串 —— 肉眼看不出来（D-49）
+    deadline = (meta.deadline or "").strip() or "未标注"
+    lines = [
+        f"《{meta.title}》 {meta.course}｜交付：{meta.submission}｜截止：{deadline}",
+        "",
+        "工作量核对清单（估算，可改）",
+    ]
+    for card in cards:
+        line = f"- {card.task_id} {card.module_name}（{card.effort_hours:g} 人时）→ {card.deliverable}"
+        if assignments:
+            line += _execution_suffix([card.task_id], by_task, roster)
+        lines.append(line)
+        lines.append(f"      验收：{card.acceptance}")
+        for ref in card.source_refs:
+            lines.append(f"      依据：{ref}")
+
+    balance = balance_loop(cards)
+    total = sum(card.effort_hours for card in cards)
+    distribution_line = (
+        f"工作量分布：合计 {total:g} 人时；max/min = {balance.ratio:.2f}"
+        f"（上限 {BALANCE_LIMIT:g}）；任务卡 {len(cards)} 张"
+    )
+    if result.generations:
+        distribution_line += f"；生成 {result.generations} 轮"
+    lines += ["", distribution_line]
+    if result.failures:
+        lines.append("自检未达标（按 D-18 交人决定）：" + "；".join(result.failures))
+    else:
+        lines.append("自检通过：每张卡都有溯源、工时均衡。")
+    return "\n".join(lines)

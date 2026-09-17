@@ -46,10 +46,12 @@ __all__ = [
     "DECOMPOSING",
     "NEEDS_RUBRIC",
     "NEEDS_RUBRIC_GROUP",
-    "NO_RUBRIC_FOUND",
     "VOTE_GENERATING",
     "VOTE_NEED_GROUP",
     "VOTE_NEED_ROSTER",
+    "VOTE_NO_RUBRIC_HUMAN",
+    "VOTE_NO_RUBRIC_HUMAN_DM",
+    "vote_no_rubric",
     "DIRECTION_NOT_MEMBER",
     "VOTE_IN_PROGRESS",
     "VOTE_CANDIDATES",
@@ -227,15 +229,26 @@ DECOMPOSING = "收到，拿现有评分点重拆一遍，马上好。"
 NEEDS_RUBRIC = "现在还没有评分点。先把作业书发给我，再回一次「作业书」。"
 # 群里那版带「@我」：同上（§9.1 第 5 条）。
 NEEDS_RUBRIC_GROUP = "现在还没有评分点。把作业书发进群，再 @我一次「作业书」。"
-NO_RUBRIC_FOUND = (
-    "这份文件里我没找到评分标准（就是「评分表」「成绩评定」那一节）。"
-    "为了不瞎拆，我先停在这儿：确认一下作业书里有没有这一节，或者换一份带评分标准的。"
-)
 
 # ---- M2 方向候选 + 群内投票（§7.1 / §7.6 / D-35 / D-36）----
 VOTE_GENERATING = "收到，按评分点想几个候选方向，大概半分钟。"
 VOTE_NEED_GROUP = "方向投票是群里的事，把「方向」发到群里。"
 VOTE_NEED_ROSTER = "还没有花名册。先在群里回「登记」建一份，再回「方向」。"
+# U3（PM 2026-09-17 裁 ①）：**没有可拆评分点 ⇒ 不出候选**，改引导人工拍板 ——
+# M2 的候选是拿评分点生成的，没有评分点就只能由人拍（§5.3 第 9 条那条指令）。
+# 群里那版带「@我」：它教的是群里发指令，门禁会吃掉不带 @ 的动作（§9.1 第 4 条）。
+VOTE_NO_RUBRIC_HUMAN = (
+    "现在没有可拆的评分点，我出不了候选。"
+    "直接 @我 发「我们要做的方向是：…」，定一个就行。"
+)
+VOTE_NO_RUBRIC_HUMAN_DM = (
+    "现在没有可拆的评分点，我出不了候选。到群里发「我们要做的方向是：…」，定一个就行。"
+)
+
+
+def vote_no_rubric(scope: str) -> str:
+    """「方向」在没有可拆评分点时那句 —— 群里带 @我、私聊保持原样（照 `needs_rubric()`）。"""
+    return VOTE_NO_RUBRIC_HUMAN if scope == GROUP else VOTE_NO_RUBRIC_HUMAN_DM
 # v1.24（§5.1 第 3 条 / §12.4）：开窗能力只给名册成员 —— 判点与 `_proposal()` 同款。
 DIRECTION_NOT_MEMBER = "这份花名册里没有你。先在群里回「登记」把自己 @ 进去，再回「方向」开投票。"
 VOTE_IN_PROGRESS = "投票还在走，还剩 {minutes} 分钟。直接回数字就行。"

@@ -250,10 +250,11 @@ def test_decompose_with_rubric_acks():
     assert _texts(route(_inbound("拆解"), {}, None, has_rubric=True)) == [replies.DECOMPOSING]
 
 
-def test_direction_without_rubric_points_to_assignment():
-    """M2：没有评分点就不生成候选（D-48 口径），也不起重活。"""
+def test_direction_without_rubric_points_to_the_human_command():
+    """U3（PM 裁 ①）：没有可拆评分点 ⇒ 不出候选，引导人工拍板，也不起重活。"""
     outcome = route(_inbound("方向"), {}, None, has_rubric=False)
-    assert _texts(outcome) == [replies.NEEDS_RUBRIC_GROUP]
+    assert _texts(outcome) == [replies.VOTE_NO_RUBRIC_HUMAN]
+    assert "我们要做的方向是" in _texts(outcome)[0]
     assert outcome.pipeline == ""
 
 
@@ -427,7 +428,7 @@ def test_collect_stage_lets_plain_commands_through():
     修之前：发一次「登记」不填表，全群的指令都被吃掉、且永不超时。
     """
     state = {"awaiting": "register", "register": {"stage": "collect", "expires_at": None}}
-    assert _texts(route(_inbound("方向"), state, None)) == [replies.NEEDS_RUBRIC_GROUP]
+    assert _texts(route(_inbound("方向"), state, None)) == [replies.VOTE_NO_RUBRIC_HUMAN]
     assert _texts(route(_inbound("作业书"), state, None)) == [replies.FILE_MISSING_GROUP]
     assert _texts(route(_inbound("今天天气不错"), state, None)) == [replies.COMMAND_LIST_TEXT]
     # 有缓存文件时照常干活：窗口不吃指令
@@ -487,7 +488,7 @@ _FORM_MENTIONS = (
 def test_initiator_command_with_mention_is_not_parsed_as_a_form():
     """真机复现：窗口里发起人发「@机器人 方向」被回成「表单里「组长」要正好 1 个人」。"""
     outcome = route(_inbound("@_user_1 方向", mentions=_AT), _window(), None)
-    assert _texts(outcome) == [replies.NEEDS_RUBRIC_GROUP]
+    assert _texts(outcome) == [replies.VOTE_NO_RUBRIC_HUMAN]
     assert outcome.state is None                      # 窗口不动
 
 
@@ -495,13 +496,13 @@ def test_stranger_command_with_mention_is_not_swallowed():
     """真机复现：窗口里旁人发「@机器人 方向」一个字都不回（最恶劣）。"""
     inbound = _inbound("@_user_1 方向", mentions=_AT, sender_open_id="ou_stranger")
     outcome = route(inbound, _window(), None)
-    assert _texts(outcome) == [replies.NEEDS_RUBRIC_GROUP]
+    assert _texts(outcome) == [replies.VOTE_NO_RUBRIC_HUMAN]
     assert outcome.state is None
 
 
 def test_initiator_command_without_mention_still_passes_through():
     """对照：同一句不带 @ 一直是正常的。"""
-    assert _texts(route(_inbound("方向"), _window(), None)) == [replies.NEEDS_RUBRIC_GROUP]
+    assert _texts(route(_inbound("方向"), _window(), None)) == [replies.VOTE_NO_RUBRIC_HUMAN]
 
 
 def test_stranger_form_is_silent_and_does_not_advance():

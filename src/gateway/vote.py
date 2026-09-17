@@ -130,8 +130,10 @@ def command(
     集合），否则回 ``DIRECTION_NOT_MEMBER`` —— 见下面 ``known`` 那段。
     """
     if not has_rubric:
-        # D-48 口径：没有评分点就不生成，不烧 token
-        return Outcome(replies=(reply(inbound, replies.needs_rubric(inbound.chat_type)),))
+        # U3（PM 2026-09-17 裁 ①）：**没有可拆评分点就不出候选**，改引导人工拍板。
+        # 判据 = 「存在 status=normal」（§6.1 的总开关，与 §6.5 同一把尺子）；
+        # 不烧 token、不起 pipeline（M2 的候选本来就是拿评分点生成的）。
+        return Outcome(replies=(reply(inbound, replies.vote_no_rubric(inbound.chat_type)),))
     members = list(getattr(roster, "members", None) or ())
     if not members:
         return Outcome(replies=(reply(inbound, replies.VOTE_NEED_ROSTER),))

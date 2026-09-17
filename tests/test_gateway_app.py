@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from src.gateway import allocation
 from src.gateway import app as app_module
 from src.gateway import replies
 from src.gateway.events import ImageOut, Inbound, Mention, Outcome, Reply
@@ -18,6 +19,32 @@ from src.models import AssignmentMeta, AssignmentRecord, Member, Roster, RubricP
 from src.storage import INDEX, JsonStore
 
 DOC = "作业书：1 实现词法分析器 40 分。2 撰写实验报告 60 分。"
+
+# U3 无评分点链路的 LLM 产物（`source_refs` 的原文片段必须在 DOC 里能对上）
+WORKLOAD_PAYLOAD = {
+    "cards": [
+        {
+            "task_id": "T1",
+            "module_name": "实现词法分析器",
+            "rubric_refs": [],
+            "source_refs": ["实现词法分析器 → 参考同类课程 4 人时"],
+            "effort_hours": 4,
+            "depends_on": [],
+            "deliverable": "一个源文件",
+            "acceptance": "能跑通词法用例",
+        },
+        {
+            "task_id": "T2",
+            "module_name": "撰写实验报告",
+            "rubric_refs": [],
+            "source_refs": ["撰写实验报告 → 3 页 × 2 人时"],
+            "effort_hours": 6,
+            "depends_on": ["T1"],
+            "deliverable": "一份报告",
+            "acceptance": "不少于 3 页",
+        },
+    ]
+}
 
 M1_PAYLOAD = {
     "assignment": {
@@ -127,7 +154,9 @@ class FakeLLM:
     def chat_json(self, system, user, parse, **kwargs):
         if self.error:
             raise self.error
-        if "M2 方向候选" in system:
+        if "工作量拆解" in system:
+            payload = WORKLOAD_PAYLOAD
+        elif "M2 方向候选" in system:
             payload = DIRECTION_PAYLOAD
         elif "M1 输入解析" in system:
             payload = M1_PAYLOAD
@@ -288,21 +317,22 @@ def test_llm_failure_degrades_with_a_human_message(env):
 
 
 class _EmptyRubricLLM(FakeLLM):
-    """M1 返回空 rubric（文件里没有评分标准），并记录 M3 有没有被调过。"""
+    """M1 返回空 rubric（文件里没有评分标准），并记下底层被叫用过哪几个 prompt。"""
 
-    def __init__(self):
+    def __init__(self, rubric=()):
         super().__init__()
-        self.m3_called = False
+        self.rubric = list(rubric)
+        self.systems: list[str] = []
 
     def chat_json(self, system, user, parse, **kwargs):
+        self.systems.append(system)
         if "M1 输入解析" in system:
-            return parse({**M1_PAYLOAD, "rubric": []})
-        self.m3_called = True
-        return parse(M3_PAYLOAD)
+            return parse({**M1_PAYLOAD, "rubric": self.rubric})
+        return super().chat_json(system, user, parse, **kwargs)
 
 
-def test_empty_rubric_stops_before_m3_and_keeps_existing_products(env):
-    """D-48 / D-49②：没找到评分标准 → 不跑 M3、**不落盘**，上一份好产物不能被清空。"""
+def test_empty_rubric_falls_back_to_the_workload_link(env):
+    """U3（§6.1）：没有可拆评分点**不再是死路** —— 走工作量链路，且不合成评分点。"""
     gateway, store, sender, _ = env
     store.save_assignment(
         AssignmentMeta(
@@ -335,12 +365,20 @@ def test_empty_rubric_stops_before_m3_and_keeps_existing_products(env):
     gateway.handle(_inbound("作业书"))
 
     assert sender.texts[0] == replies.PARSING
-    assert sender.texts[-1] == replies.NO_RUBRIC_FOUND
-    assert llm.m3_called is False                                   # 没起 M3、不烧第二次 LLM
-    # 拒拆时一个字都不写（P2）：三份产物全是旧的
-    assert [p.id for p in store.load_rubric()] == ["R_old"]
-    assert [c.task_id for c in store.load_cards()] == ["T_seed"]
-    assert store.load_assignment().title == "旧作业"
+    report = sender.texts[-1]
+    assert "工作量核对清单（估算，可改）" in report
+    assert "工作量分布" in report
+    assert "覆盖率" not in report                       # 红线：这条链路不出覆盖率
+    # 没有可拆评分点 ⇒ 走的是**工作量拆解**那个新调用点，M3 一次都没跑
+    assert not any("M3 任务拆解" in system for system in llm.systems)
+    assert any("工作量拆解" in system for system in llm.systems)
+    # 不合成凑数评分点（§6.2 红线）：rubric.json 记的是这份作业书**真实**的评分点（空）
+    assert store.load_rubric() == []
+    cards = store.load_cards()
+    assert [card.task_id for card in cards] == ["T1", "T2"]
+    assert all(card.rubric_refs == [] for card in cards)
+    assert all(card.source_refs for card in cards)
+    assert store.load_assignment().title == M1_PAYLOAD["assignment"]["title"]
 
 
 def test_register_confirm_writes_members_json(env):
@@ -648,15 +686,21 @@ def test_direction_window_settles_and_writes_direction_json(env):
     assert "方向定了" in sender.texts[-1]
 
 
-def test_direction_pipeline_without_rubric_says_so(env):
+def test_direction_without_a_usable_rubric_points_to_the_human_command(env):
+    """U3（PM 裁 ①）：库里没有一条可拆（status=normal）的评分点 ⇒ 不出候选、不烧 token、引导人工拍板。"""
     gateway, store, sender, _ = env
     _seed_direction(store)
-    store.save_rubric([])
+    store.save_rubric(
+        [RubricPoint(id="R1", quote="内容充实", observable="不可核对", status="ambiguous")]
+    )
+    llm = FakeLLM()
+    gateway._llm_client = llm
 
     gateway.handle(_inbound("方向"))
 
-    assert sender.texts == [replies.NEEDS_RUBRIC_GROUP]
+    assert sender.texts == [replies.VOTE_NO_RUBRIC_HUMAN]
     assert store.load_state().get("awaiting") is None
+    assert "我们要做的方向是" in sender.texts[0]
 
 
 # ---------- M5 匿名代言（§6.5 / D-55）----------
@@ -1463,3 +1507,190 @@ def test_a_lost_race_replaces_the_announcement_instead_of_lying(env):
     assert all("假公示" not in text for text in sender.texts)
     assert store.load_assignments()[0].assignee == "ou_b"
     assert store.load_changes() == []
+
+
+# ---------- U3 无评分点链路（§6.1 / §6.2 / §6.5）----------
+
+
+class _BaselineLLM(FakeLLM):
+    """T12 基线：5 条评分点 / 4 条 normal（§3.4 那份人工基线）。"""
+
+    def chat_json(self, system, user, parse, **kwargs):
+        if "M1 输入解析" in system:
+            return parse(
+                {
+                    **M1_PAYLOAD,
+                    "rubric": [
+                        {"id": "R1", "quote": "实现词法分析器", "weight": 25,
+                         "observable": "可运行", "status": "normal"},
+                        {"id": "R2", "quote": "撰写实验报告", "weight": 25,
+                         "observable": "有报告", "status": "normal"},
+                        {"id": "R3", "quote": "作业书：", "weight": 25,
+                         "observable": "有源码", "status": "normal"},
+                        {"id": "R4", "quote": "1 实现词法分析器", "weight": 25,
+                         "observable": "能跑", "status": "normal"},
+                        {"id": "R5", "quote": "60 分", "observable": "不可核对",
+                         "status": "ambiguous"},
+                    ],
+                }
+            )
+        if "M3 任务拆解" in system:
+            return parse(
+                {
+                    "cards": [
+                        {"task_id": "T1", "module_name": "实现词法分析器",
+                         "rubric_refs": ["R1", "R3", "R4"], "effort_hours": 4,
+                         "depends_on": [], "deliverable": "源码", "acceptance": "能跑"},
+                        {"task_id": "T2", "module_name": "撰写实验报告",
+                         "rubric_refs": ["R2"], "effort_hours": 4,
+                         "depends_on": ["T1"], "deliverable": "报告", "acceptance": "有报告"},
+                    ]
+                }
+            )
+        raise AssertionError(system[:40])
+
+
+def test_the_rubric_link_still_reports_the_same_coverage(env):
+    """§6.3 ③（红线回归）：改造前后 T12 覆盖率**逐位一致** —— 基线 4/4。"""
+    gateway, store, sender, _ = env
+    gateway._llm_client = _BaselineLLM()
+    _seed_pending_file(store)
+
+    gateway.handle(_inbound("作业书"))
+
+    report = sender.texts[-1]
+    assert "评分点核对清单" in report
+    assert "覆盖率：4/4 = 100%（循环口径：分母 = status=normal 的可拆点）" in report
+    assert "[?] R5" in report                       # 模糊点照旧单列、不进分母
+
+
+def test_an_all_ambiguous_rubric_never_prints_a_zero_coverage(env):
+    """§6.1：库非空但一条 normal 都没有 —— 归无评分点链路，绝不打出"覆盖率 0/0"。"""
+    gateway, store, sender, _ = env
+    gateway._llm_client = _EmptyRubricLLM(
+        rubric=[{"id": "R1", "quote": "实现词法分析器", "observable": "不可核对",
+                 "status": "ambiguous"}]
+    )
+    _seed_pending_file(store)
+
+    gateway.handle(_inbound("作业书"))
+
+    report = sender.texts[-1]
+    assert "工作量核对清单" in report
+    assert "覆盖率" not in report
+    assert [point.id for point in store.load_rubric()] == ["R1"]      # 真实的点照记
+    assert all(card.rubric_refs == [] for card in store.load_cards())
+
+
+def test_the_workload_link_never_touches_the_coverage_loop(env, monkeypatch):
+    """§6.2 红线：把覆盖率取数三个绑定全换成抛异常，工作量链路照跑。"""
+    gateway, store, sender, _ = env
+    gateway._llm_client = _EmptyRubricLLM()
+
+    def boom(*args, **kwargs):
+        raise AssertionError("无评分点链路不许碰覆盖率取数（§6.2）")
+
+    for target in (
+        "src.gateway.app.coverage_loop",
+        "src.report.checklist.coverage_loop",
+        "src.intelligence.decompose.coverage_loop",
+    ):
+        monkeypatch.setattr(target, boom)
+    _seed_pending_file(store)
+
+    gateway.handle(_inbound("作业书"))
+
+    assert "工作量核对清单" in sender.texts[-1]
+    assert [card.task_id for card in store.load_cards()] == ["T1", "T2"]
+
+
+def test_decompose_without_a_usable_rubric_points_back_to_the_book(env):
+    """§6.1 同一把尺子：「拆解」没有可拆点 ⇒ 回重试入口，不烧 token、不写盘。"""
+    gateway, store, sender, _ = env
+    store.save_rubric(
+        [RubricPoint(id="R1", quote="内容充实", observable="不可核对", status="ambiguous")]
+    )
+    llm = FakeLLM()
+    gateway._llm_client = llm
+
+    gateway.handle(_inbound("拆解"))
+
+    assert sender.texts == [replies.NEEDS_RUBRIC_GROUP]
+    assert store.load_cards() == []
+
+
+def _seed_workload_workspace(store):
+    store.save_assignment(
+        AssignmentMeta(
+            course="编译原理",
+            title="课程设计",
+            submission="源码 + 报告",
+            deadline="2026-09-19T23:59",
+            source_file="作业书.pdf",
+        )
+    )
+    store.save_rubric([])                                  # 工作量链路：没有评分点
+    store.save_cards(
+        [
+            TaskCard(
+                task_id="T1",
+                module_name="实现词法分析器",
+                rubric_refs=[],
+                source_refs=["实现词法分析器 → 4 人时"],
+                effort_hours=4.0,
+                deliverable="一个源文件",
+                acceptance="能跑通",
+            ),
+            TaskCard(
+                task_id="T2",
+                module_name="撰写实验报告",
+                rubric_refs=[],
+                source_refs=["撰写实验报告 → 6 人时"],
+                effort_hours=6.0,
+                deliverable="一份报告",
+                acceptance="不少于 3 页",
+            ),
+        ]
+    )
+    store.save_members(
+        Roster(
+            leader="ou_user",
+            members=[
+                Member(open_id="ou_user", name="张三"),
+                Member(open_id="ou_b", name="李四"),
+            ],
+            registered_at="2026-09-13T09:00:00",
+            confirmed_by="ou_user",
+        )
+    )
+    store.save_assignments(
+        [
+            AssignmentRecord(task_id="T1", assignee="ou_user", source="auto"),
+            AssignmentRecord(task_id="T2", assignee="", source="auto"),
+        ]
+    )
+
+
+def test_the_report_replaces_only_the_coverage_section(env):
+    """U3（PM 裁 ②）：报告只换覆盖率那一段 —— 总表 / 清单 / 甘特图照旧。"""
+    gateway, store, sender, _ = env
+    _seed_workload_workspace(store)
+
+    gateway.handle(_inbound("报告"))
+
+    assert sender.texts[0] == replies.REPORT_GENERATING
+    # 三件套照旧：总表（逐字等于渲染函数的结果）→ 核对清单 → 甘特图
+    assert sender.texts[1] == allocation.render_board(
+        store.load_assignments(),
+        store.load_cards(),
+        store.load_members(),
+        store.load_preferences(),
+        show_completion=True,
+    )
+    assert "分配总表" in sender.texts[1]
+    checklist = sender.texts[2]
+    assert "工作量核对清单（估算，可改）" in checklist
+    assert "工作量分布" in checklist
+    assert "覆盖率" not in checklist
+    assert sender.images and sender.images[0][0] == "c1"      # 甘特图照发
+    assert "分配总表" in store.path("report.md").read_text(encoding="utf-8")

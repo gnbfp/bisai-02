@@ -28,6 +28,7 @@ from src.gateway.client import FeishuClient
 from src.gateway.events import ImageOut, Inbound, Outcome, Reply, reply, to_inbound
 from src.gateway.router import route
 from src.intelligence.coverage import coverage_loop
+from src.intelligence.workload import check_workload, decompose_workload
 from src.intelligence.decompose import DecomposeResult, check, decompose
 from src.intelligence.direction import generate_directions
 from src.intelligence.extract import (
@@ -40,7 +41,7 @@ from src.intelligence.extract import (
 from src.intelligence.llm import LLMClient, LLMError
 from src.intelligence.parse import parse_assignment
 from src.models import AssignmentRecord, ChangeRecord, Preference, Roster
-from src.report.checklist import render_checklist
+from src.report.checklist import render_checklist, render_workload_checklist
 from src.report.gantt import render_gantt
 from src.storage import (
     ASSIGNMENTS,
@@ -194,7 +195,10 @@ class Gateway:
             print(f"[M0] {_stamp()} dup 跳过 id={inbound.message_id}")
             return Outcome()
         state = store.load_state()
-        has_rubric = bool(store.load_rubric())
+        # U3（§6.1）：总开关 = **存在 ≥1 条 status="normal"**，不是"列表非空" ——
+        # "非空但全是 ambiguous" 是真实可达形态，必须归入无评分点链路（否则分母 0
+        # 会伪装成"覆盖率 0%"，撞上 D-48 的"不计算 ≠ 算出来是 0"）。
+        has_rubric = any(point.status == "normal" for point in store.load_rubric())
         meta = store.load_assignment()
         outcome = route(
             inbound,
@@ -484,8 +488,11 @@ class Gateway:
 
         # 空 rubric：M1 全文没找到评分标准（D-48）→ 不跑 M3、不拿正文要求凑数，
         # 也**一个字都不落盘** —— 否则拒拆会把上一份好产物清空（D-49 ②）。
-        if not parsed.points:
-            self._send(reply(inbound, replies.NO_RUBRIC_FOUND))
+        normal = [point for point in parsed.points if point.status == "normal"]
+        if not normal:
+            # U3（§6.1 / §6.5）：空列表与"全是 ambiguous"走**同一条**工作量链路。
+            # 与旧行为的区别只有一个：不再是死路（拒拆），但也不碰覆盖率。
+            self._run_workload(inbound, text, parsed, store)
             return
 
         # 三份产物必须**一起**落盘（F2）：M3 抛错时若 M1 的产物已经写下去，
@@ -511,9 +518,43 @@ class Gateway:
             report += "\n\n" + "\n".join(f"[软警告] {w}" for w in warnings)
         self._send(reply(inbound, report))
 
+    def _run_workload(
+        self, inbound: Inbound, text: str, parsed, store: JsonStore
+    ) -> None:
+        """U3 无评分点链路：正文 → 工作量卡 → 核对清单发群（§6.2）。
+
+        落盘口径与评分点链路**同一套 F2 约束**：三份产物一起写，免得盘上留下
+        "新 rubric + 旧 cards" 的混用快照。``rubric.json`` 记的是这份作业书里
+        **真实的**评分点（可能为空 / 全是 ambiguous）—— 一个凑数点都不加（§6.2 红线）。
+        """
+        result = decompose_workload(text, self._llm())
+        store.save_assignment(parsed.meta)
+        store.save_rubric(list(parsed.points))
+        store.save_cards(list(result.cards))
+
+        report = render_workload_checklist(parsed.meta, result.cards, result)
+        # 三道软校验同评分点链路（§7.5）：只警告、不拒收
+        warnings = [
+            w
+            for w in (
+                check_weight_sum(parsed.points),
+                check_radical_residue(text),
+                check_deadline(parsed.meta),
+            )
+            if w
+        ]
+        if warnings:
+            report += "\n\n" + "\n".join(f"[软警告] {w}" for w in warnings)
+        self._send(reply(inbound, report))
+
     def _run_decompose(self, inbound: Inbound, store: JsonStore) -> None:
         """「拆解」：用现有评分点重跑 M3，再出一份核对清单。"""
         points = store.load_rubric()
+        if not any(point.status == "normal" for point in points):
+            # §6.1 同一把尺子：没有可拆点就没有"用现有评分点重拆"这回事 ——
+            # 回重试入口（跟 router 那句同源），不烧 token、不写盘（防覆盖率 0/0）
+            self._send(reply(inbound, replies.needs_rubric(inbound.chat_type)))
+            return
         result = decompose(points, self._llm())
         store.save_cards(list(result.cards))
 
@@ -540,9 +581,9 @@ class Gateway:
         不然这期间别人刚建的花名册 / 窗口会被一起写没。
         """
         points = store.load_rubric()
-        if not points:
-            # D-48 口径：没有评分点就不生成，不烧 token
-            self._send(reply(inbound, replies.NEEDS_RUBRIC))
+        if not any(point.status == "normal" for point in points):
+            # U3（PM 裁 ①）：没有可拆评分点 ⇒ 不出候选，引导人工拍板（与 router 同源）
+            self._send(reply(inbound, replies.vote_no_rubric(inbound.chat_type)))
             return
         roster = store.load_members()
         if roster is None or not roster.members:
@@ -576,11 +617,18 @@ class Gateway:
         cards = store.load_cards()
         assignments = store.load_assignments()
         roster = store.load_members()
-        if meta is None or not points or not cards or not assignments:
+        # U3（PM 裁 ②）：**只换覆盖率那一段** —— 总表 / 核对清单 / 甘特图三件套照旧，
+        # 所以这里不再要求"有评分点"（工作量链路里 rubric.json 可能就是空的）。
+        if meta is None or not cards or not assignments:
             self._send(reply(inbound, replies.REPORT_NEED_ASSIGNMENTS))
             return
+        normal = [point for point in points if point.status == "normal"]
         result = DecomposeResult(
-            cards=tuple(cards), failures=tuple(check(cards, points)), generations=0
+            cards=tuple(cards),
+            failures=tuple(
+                check(cards, points) if normal else check_workload(cards)
+            ),
+            generations=0,
         )
         try:
             gantt = render_gantt(cards, assignments, meta, store.path(GANTT), roster)
@@ -598,8 +646,14 @@ class Gateway:
             store.load_preferences(),
             show_completion=True,
         )
-        checklist_text = render_checklist(
-            meta, points, cards, result, assignments=assignments, roster=roster
+        checklist_text = (
+            render_checklist(
+                meta, points, cards, result, assignments=assignments, roster=roster
+            )
+            if normal
+            else render_workload_checklist(
+                meta, cards, result, assignments=assignments, roster=roster
+            )
         )
         store.path(REPORT).write_text(
             board_text + "\n\n" + checklist_text + "\n", encoding="utf-8"

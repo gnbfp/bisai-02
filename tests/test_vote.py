@@ -108,8 +108,9 @@ def test_group_direction_acks_and_starts_the_pipeline():
 
 
 def test_direction_without_rubric_does_not_start_the_pipeline():
+    """U3（PM 裁 ①）：没有可拆评分点 ⇒ 不出候选（不烧 token），引导人工拍板。"""
     outcome = route(_inbound("方向"), {}, _roster(), has_rubric=False, now=OPEN)
-    assert _texts(outcome) == [replies.NEEDS_RUBRIC_GROUP]
+    assert _texts(outcome) == [replies.VOTE_NO_RUBRIC_HUMAN]
     assert outcome.pipeline == ""
 
 
