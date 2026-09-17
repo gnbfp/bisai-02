@@ -912,6 +912,29 @@ def test_every_message_is_logged_and_duplicates_are_marked(env, capsys):
     assert "dup 跳过" in out
 
 
+def test_the_recv_log_records_the_raw_mention_map(env, capsys):
+    """PM 2026-09-17 收：@ 结构的原文映射要留痕（key>open_id，@ 机器人的标 (bot)）。
+
+    2026-09-17 10:48:58「组员行 @ 两个、只认一个」当时只能靠回显反推 —— 根因就是这行
+    日志只打 text、不打 mentions。这条测试把它钉住：以后再出这类问题，看日志就能自证。
+    """
+    gateway, store, sender, _ = env
+    gateway.handle(
+        _inbound(
+            "登记",
+            mentions=(
+                Mention(key="@_user_1", open_id="ou_bot", name="机器人", is_bot=True),
+                Mention(key="@_user_2", open_id="ou_wang", name="王五"),
+            ),
+        )
+    )
+    gateway.handle(_inbound("没有 @ 的一句"))
+
+    out = capsys.readouterr().out
+    assert "mentions=@_user_1>ou_bot(bot),@_user_2>ou_wang" in out
+    assert "mentions=- " in out
+
+
 def test_reply_trace_is_logged_with_a_timestamp(env, capsys):
     """P1-J：每条发出去的回复都留一行带时间戳的轨迹。"""
     gateway, store, sender, _ = env

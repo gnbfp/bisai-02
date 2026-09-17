@@ -71,6 +71,22 @@ def _stamp() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def _mentions_log(mentions) -> str:
+    """@ 结构的原文映射（PM 2026-09-17 收）：``key>open_id``，@ 到机器人的那一下标 ``(bot)``。
+
+    为什么要有它：@ 相关的问题此前只能靠回显反推 —— 2026-09-17 10:48:58「组员行 @ 了两个人
+    只认一个」就是推出来的结论，因为原始 ``mentions`` 没留痕。没有 @ 记 ``-``（别留空，
+    空值看着像被截断）。
+    """
+    if not mentions:
+        return "-"
+    parts = []
+    for mention in mentions:
+        bot = "(bot)" if mention.is_bot else ""
+        parts.append(f"{mention.key or '?'}>{mention.open_id or '?'}{bot}")
+    return ",".join(parts)
+
+
 class SingleInstance:
     """单实例保护（P0-E）—— 机器上只允许跑一个网关。
 
@@ -171,6 +187,7 @@ class Gateway:
         print(
             f"[M0] {_stamp()} recv id={inbound.message_id} chat={inbound.chat_id} "
             f"from={inbound.sender_open_id} type={inbound.message_type} "
+            f"mentions={_mentions_log(inbound.mentions)} "
             f"text={inbound.text[:40]}"
         )
         # 第一步：**选工作空间**（U2 / §3.1）。群消息零歧义，用这条消息的 chat_id；
