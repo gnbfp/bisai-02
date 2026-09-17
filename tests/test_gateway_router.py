@@ -531,6 +531,19 @@ def test_the_register_form_is_taken_before_the_mention_gate():
     assert outcome.state["register"]["leader"]["open_id"] == "ou_a"
 
 
+def test_form_without_any_mention_gets_a_prompt_not_silence():
+    """2026-09-17 PM：登记窗内**无 @ 的表单**要回提示 —— 旧行为掉到 @ 门禁上，一句不吭。"""
+    outcome = route(_nobody("登记\n组长：张三\n组员：李四 王五"), _window(), None)
+    assert _texts(outcome) == [replies.REGISTER_FORM_BAD]
+    assert outcome.state is None                      # 不推进、不落盘
+
+
+def test_stranger_form_without_any_mention_stays_silent():
+    """对照：旁人那份无 @ 表单照旧静默（不替别人接管窗口）。"""
+    inbound = _nobody("登记\n组长：张三\n组员：李四 王五", sender_open_id="ou_stranger")
+    assert route(inbound, _window(), None) == Outcome()
+
+
 def test_register_command_inside_the_window_shows_the_form_again():
     """防回归：表单第一行就是「登记」，不能被前缀抓错、也不能不认。"""
     inbound = _inbound("@_user_1 登记", mentions=_AT)

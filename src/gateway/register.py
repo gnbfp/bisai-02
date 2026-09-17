@@ -83,10 +83,11 @@ def classify(block: dict, inbound: Inbound, text: str, now: datetime | None = No
       * ``"silent"`` —— 归状态机但不回话（§7.7「旁人发言静默忽略」）；
       * ``"pass"``   —— 不归状态机，照走 7 条前缀。
 
-    **collect 阶段必须"带 @ 且 长得像表单"两项同时成立**，缺一不可：
-    飞书用户的习惯就是发指令前先 @ 机器人，只按「带 @」接管会把指令当表单吃掉
-    （真机复现：发起人发「@机器人 方向」被回「组长要正好 1 个人」，
-    旁人发同一句则一个字都不回）。**带 @ != 表单消息。**
+    **collect 阶段的接管条件是「长得像表单」，不是「带 @」**：飞书用户的习惯是发指令
+    前先 @ 机器人，只按「带 @」接管会把指令当表单吃掉（真机复现：发起人发
+    「@机器人 方向」被回「组长要正好 1 个人」，旁人发同一句则一个字都不回）。
+    **带 @ != 表单消息**；反过来，**表单缺 @ 也不许静默**（2026-09-17 PM 拍）——
+    掉到 @ 门禁上就是一句不吭，人以为机器人死了。
 
     ``now`` 只为一件事存在：**过期窗口一律走 ``"step"``**，好让 ``register_step()``
     的过期分支把它清掉（上一轮复核定下的「超时窗口谁说话都能清掉」，见 ``register_step``）。
@@ -102,8 +103,11 @@ def classify(block: dict, inbound: Inbound, text: str, now: datetime | None = No
         # 机器人已明说「回复别的就作废」⇒ 发起人的任何话都算数
         return "step" if is_initiator else "silent"
 
-    if not inbound.mentions or not _FORM_LINE.search(text or ""):
+    if not _FORM_LINE.search(text or ""):
+        # 不像表单：不接管（形状才是接管条件，见上面那段）
         return "pass"
+    # 长得像表单：**缺 @ 也回话** —— D-34 只认 @ 结构里的 open_id，_collect() 会回
+    # REGISTER_FORM_BAD 教他照表单重发一次，而不是让门禁把这句话悄悄吃掉
     return "step" if is_initiator else "silent"
 
 
