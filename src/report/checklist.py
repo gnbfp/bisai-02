@@ -34,16 +34,19 @@ def _stem(source_file: str) -> str:
 def _meta_line(meta: AssignmentMeta) -> str:
     """抬头那一行。**空字段不许显示成空档**（D-49 + 2026-09-17 拍 A / 抬头兜底）。
 
-    ``title`` 空时用**文件名**兜底（``source_file`` 是程序给的事实，比「未标注」有用）；
-    ``course / submission / deadline`` 照旧「未标注」。两条链路共用这一行。
+    ``title`` 空时用**文件名**兜底（``source_file`` 是程序给的事实，比「未标注」有用），
+    且**不套书名号** —— 文件名自己可能就带（真机那份叫《问题求解与程序设计》课程设计
+    报告指导书.docx，套上就成《《…》…》）；书名号只包**真标题**。``course /
+    submission / deadline`` 照旧「未标注」。两条链路共用这一行。
     """
 
     def show(value: str) -> str:
         return (value or "").strip() or "未标注"
 
-    title = (meta.title or "").strip() or _stem(meta.source_file)
+    title = (meta.title or "").strip()
+    head = f"《{title}》" if title else _stem(meta.source_file)
     return (
-        f"《{title}》 {show(meta.course)}"
+        f"{head} {show(meta.course)}"
         f"｜交付：{show(meta.submission)}｜截止：{show(meta.deadline)}"
     )
 

@@ -137,6 +137,36 @@ def test_without_assignments_the_old_output_is_unchanged():
     assert "负责人" not in text and "完成 " not in text
 
 
+def test_filename_fallback_never_doubles_the_title_marks():
+    """真机那份文件名自带《》—— 兜底不能再套一层（会成《《…》…》）。"""
+    meta = AssignmentMeta(
+        course="",
+        title="",
+        submission="",
+        deadline="",
+        source_file="《问题求解与程序设计》课程设计报告指导书.docx",
+    )
+    result = DecomposeResult(cards=(), failures=(), generations=0)
+    text = render_checklist(meta, _points(), [], result)
+    assert text.startswith("《问题求解与程序设计》课程设计报告指导书 未标注")
+    assert "《《" not in text
+
+
+def test_a_real_title_still_gets_the_title_marks():
+    """有真标题时书名号照旧 —— 只在文件名兜底那一路去掉。"""
+    meta = AssignmentMeta(
+        course="编译原理",
+        title="C 语言课程设计",
+        submission="源码 + 报告",
+        deadline="",
+        source_file="作业书.docx",
+    )
+    result = DecomposeResult(cards=(), failures=(), generations=0)
+    assert "《C 语言课程设计》 编译原理｜交付：源码 + 报告" in render_checklist(
+        meta, _points(), [], result
+    )
+
+
 def test_missing_meta_fields_are_shown_as_unlabeled():
     """拍 A：course / title / submission 允许空 —— 但空档要显示成「未标注」，
     两条链路的抬头都得是同一行（红线：逐位一致）。
@@ -149,6 +179,6 @@ def test_missing_meta_fields_are_shown_as_unlabeled():
         source_file="指导书.docx",
     )
     result = DecomposeResult(cards=(), failures=(), generations=0)
-    expected = "《指导书》 未标注｜交付：未标注｜截止：未标注"   # 抬头用文件名兜底
+    expected = "指导书 未标注｜交付：未标注｜截止：未标注"   # 文件名兜底、不套书名号
     assert expected in render_checklist(meta, _points(), [], result)
     assert expected in render_workload_checklist(meta, [], result)
