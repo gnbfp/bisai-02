@@ -14,6 +14,7 @@ M7 执行报告复用的就是本函数：多传一个 ``assignments`` 就多出
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Sequence
 
 from src.intelligence.coverage import balance_loop, coverage_loop
@@ -23,18 +24,26 @@ from src.models import BALANCE_LIMIT, AssignmentMeta, AssignmentRecord, Roster, 
 __all__ = ["render_checklist", "render_workload_checklist"]
 
 
-def _meta_line(meta: AssignmentMeta) -> str:
-    """抬头那一行。**空字段不许显示成空档**（D-49 + 2026-09-17 拍 A）。
+def _stem(source_file: str) -> str:
+    """``指导书.docx`` → ``指导书``；取不出名字 → 「未标注」。"""
+    name = Path(str(source_file or "")).name
+    stem = name.rsplit(".", 1)[0] if "." in name[1:] else name
+    return stem.strip() or "未标注"
 
-    ``deadline`` 早就是「未标注」；``course / title / submission`` 允许空之后同样按
-    「未标注」显示 —— 肉眼看得见，才知道下一步该补什么。两条链路共用这一行。
+
+def _meta_line(meta: AssignmentMeta) -> str:
+    """抬头那一行。**空字段不许显示成空档**（D-49 + 2026-09-17 拍 A / 抬头兜底）。
+
+    ``title`` 空时用**文件名**兜底（``source_file`` 是程序给的事实，比「未标注」有用）；
+    ``course / submission / deadline`` 照旧「未标注」。两条链路共用这一行。
     """
 
     def show(value: str) -> str:
         return (value or "").strip() or "未标注"
 
+    title = (meta.title or "").strip() or _stem(meta.source_file)
     return (
-        f"《{show(meta.title)}》 {show(meta.course)}"
+        f"《{title}》 {show(meta.course)}"
         f"｜交付：{show(meta.submission)}｜截止：{show(meta.deadline)}"
     )
 

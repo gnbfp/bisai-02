@@ -149,6 +149,6 @@ def test_missing_meta_fields_are_shown_as_unlabeled():
         source_file="指导书.docx",
     )
     result = DecomposeResult(cards=(), failures=(), generations=0)
-    expected = "《未标注》 未标注｜交付：未标注｜截止：未标注"
+    expected = "《指导书》 未标注｜交付：未标注｜截止：未标注"   # 抬头用文件名兜底
     assert expected in render_checklist(meta, _points(), [], result)
     assert expected in render_workload_checklist(meta, [], result)
