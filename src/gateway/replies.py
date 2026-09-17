@@ -133,6 +133,7 @@ __all__ = [
     "REGISTER_CANCELLED",
     "REGISTER_EXPIRED",
     "REGISTER_LEADER_ONLY",
+    "WELCOME",
 ]
 
 GROUP = "group"
@@ -197,6 +198,26 @@ def command_list(scope: str) -> str:
 # 群里 @ 后的"群内可用"清单（T01 的 8 条口径）与私聊兜底清单 —— 两份都是派生的。
 COMMAND_LIST_TEXT = command_list(GROUP)
 COMMAND_LIST_DM = command_list(DM)
+
+# ---- 入群欢迎语（§9.1 第 20 条 · PM 2026-09-17 收）----
+
+# 欢迎语里点名哪 5 条 —— 只是**挑选**，文案照 COMMANDS 渲染（D-76：不另抄一份）
+WELCOME_PICKS = ("作业书", "登记", "方向", "你想做哪一块", "报告")
+
+
+def _picked_lines() -> list[str]:
+    by_prefix = {item.prefix: item for item in COMMANDS}
+    return [by_prefix[prefix].line_for(GROUP) for prefix in WELCOME_PICKS]
+
+
+# 机器人被拉进群时**只发这一次**（`client.py` 的 `register_p2_im_chat_member_bot_added_v1`）：
+# 一句欢迎 + 5 条高频指令 + 有事 @我（PM 口径）。那句块级「群里每条都要 @我」是有意的 ——
+# 这 5 条里 4 条的 `group_line` 还欠「@我」（§9.1 第 4 条同族的 8 处，等文案批一次收）。
+WELCOME = (
+    "我是小组作业机器人。有事 @我（群里不 @ 我是不理的，私聊直接说就行）。\n"
+    "最常用的 5 条 —— 群里每条都要 @我：\n"
+    + "\n".join(f"{index}. {line}" for index, line in enumerate(_picked_lines(), start=1))
+)
 
 # ---- 作业书 / 拆解 主链路 ----
 FILE_RECEIVED = "《{name}》我拿到了，回「作业书」我就开始解析。"

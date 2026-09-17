@@ -20,6 +20,7 @@ BLOCK_TEMPLATES = {
     "REGISTER_FORM",
     "REGISTER_FORM_BAD",
     "REGISTER_CONFIRM",
+    "WELCOME",
 }
 
 # §11.2 ② 点名不许出现的"字段名："结构 + ④ 的口吻词表。
@@ -82,6 +83,24 @@ def test_command_list_is_derived_from_the_scope_table():
     assert replies.COMMAND_LIST_TEXT == replies.command_list(replies.GROUP)
     assert replies.COMMAND_LIST_DM == replies.command_list(replies.DM)
     assert len(replies.COMMAND_LIST_TEXT.splitlines()) == len(group) + 1     # 表头一行
+
+
+def test_welcome_names_five_commands_and_the_at_hint():
+    """§9.1 第 20 条：欢迎语 = 一句欢迎 + 5 条高频指令 + 有事 @我。"""
+    assert "@我" in replies.WELCOME
+    assert replies.WELCOME.splitlines()[0].startswith("我是小组作业机器人")
+    numbered = [
+        line for line in replies.WELCOME.splitlines() if re.match(r"^\d+\. ", line)
+    ]
+    assert len(numbered) == 5
+    rendered = {
+        item.prefix: item.line_for(replies.GROUP)
+        for item in replies.COMMANDS
+        if item.prefix in replies.WELCOME_PICKS
+    }
+    assert len(rendered) == 5                       # 挑选的名字都在 COMMANDS 里
+    for line in numbered:
+        assert line.split(". ", 1)[1] in rendered.values()
 
 
 def test_the_two_lists_are_not_the_same_sheet():

@@ -165,13 +165,20 @@ class FeishuClient:
 
     # ---------- 长连接（阻塞）----------
 
-    def start(self, on_event) -> None:
+    def start(self, on_event, on_bot_added=None) -> None:
+        """建立长连接（阻塞）。
+
+        ``on_bot_added`` = 入群欢迎语的回调（§9.1 第 20 条）：**不注册这个事件**，机器人
+        被拉进群就一声不吭，SDK 还会打一行 ``processor not found``（真机 2026-09-17 三次）。
+        传 ``None`` 只跑消息回调（探针那种单事件用法不受影响）。
+        """
         lark = self._lark()
-        handler = (
-            lark.EventDispatcherHandler.builder("", "")
-            .register_p2_im_message_receive_v1(on_event)
-            .build()
-        )
+        builder = lark.EventDispatcherHandler.builder(
+            "", ""
+        ).register_p2_im_message_receive_v1(on_event)
+        if on_bot_added is not None:
+            builder = builder.register_p2_im_chat_member_bot_added_v1(on_bot_added)
+        handler = builder.build()
         client = lark.ws.Client(
             self.config.feishu_app_id,
             self.config.feishu_app_secret,

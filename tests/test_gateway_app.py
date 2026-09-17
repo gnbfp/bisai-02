@@ -4,6 +4,7 @@ import itertools
 import json
 import os
 import socket
+from types import SimpleNamespace
 from datetime import datetime, timedelta
 
 import pytest
@@ -303,6 +304,21 @@ def test_extract_rejection_replies_and_clears_pending(env):
 
     assert "PDF 没有文字层" in sender.texts[1]
     assert "pending_file" not in store.load_state()
+
+
+def test_bot_added_sends_the_welcome_exactly_once(env, capsys):
+    """§9.1 第 20 条：注册 im.chat.member.bot.added_v1 —— 被拉进群要说话，且只一次。"""
+    gateway, store, sender, _ = env
+    event = SimpleNamespace(
+        header=SimpleNamespace(event_id="ev_1"),
+        event=SimpleNamespace(chat_id="oc_new"),
+    )
+
+    gateway.on_bot_added(event)
+    gateway.on_bot_added(event)          # 重复投递（同 event_id）不再欢迎第二次
+
+    assert sender.texts == [replies.WELCOME]
+    assert "bot_added dup 跳过" in capsys.readouterr().out
 
 
 def test_llm_failure_degrades_with_a_human_message(env, capsys):

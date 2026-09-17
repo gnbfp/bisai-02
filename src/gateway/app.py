@@ -159,6 +159,8 @@ class Gateway:
         self.sender = sender
         self.downloader = downloader
         self._llm_client = llm_client
+        # 入群欢迎语的重复投递去重（内存里记一把就够：重投发生在同一条连接的生命周期内）
+        self._welcomed_events: set[str] = set()
 
     # ---------- 飞书回调入口 ----------
 
@@ -169,6 +171,32 @@ class Gateway:
         except Exception as exc:
             print(
                 f"[M0] 处理事件出错（已忽略）：{type(exc).__name__}: {exc}", file=sys.stderr
+            )
+
+    def on_bot_added(self, data) -> None:
+        """机器人被拉进群：发一次欢迎语（§9.1 第 20 条 · PM 2026-09-17 收）。
+
+        只欢迎，**不读也不写任何业务数据** —— 进群那一刻也有话说，仅此而已。
+        重复投递按 ``event_id`` 挡（没有 event_id 的老事件退化成 ``chat_id``）。
+        """
+        try:
+            event = getattr(data, "event", None)
+            chat_id = str(getattr(event, "chat_id", "") or "")
+            header = getattr(data, "header", None)
+            key = str(getattr(header, "event_id", "") or "") or chat_id
+            if not chat_id:
+                print(f"[M0] {_stamp()} bot_added 缺 chat_id，忽略", file=sys.stderr)
+                return
+            if key in self._welcomed_events:
+                print(f"[M0] {_stamp()} bot_added dup 跳过 chat={chat_id}")
+                return
+            self._welcomed_events.add(key)
+            print(f"[M0] {_stamp()} bot_added chat={chat_id} -> 欢迎语")
+            self._send(Reply(chat_id=chat_id, text=replies.WELCOME))
+        except Exception as exc:
+            print(
+                f"[M0] 处理入群事件出错（已忽略）：{type(exc).__name__}: {exc}",
+                file=sys.stderr,
             )
 
     def handle(self, inbound: Inbound) -> Outcome:
@@ -811,7 +839,7 @@ def main(argv=None) -> int:
             threading.Timer(args.seconds, _stop).start()
 
         try:
-            client.start(gateway.on_event)
+            client.start(gateway.on_event, gateway.on_bot_added)
         except KeyboardInterrupt:
             pass
         return 0
