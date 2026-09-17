@@ -305,7 +305,7 @@ def test_extract_rejection_replies_and_clears_pending(env):
     assert "pending_file" not in store.load_state()
 
 
-def test_llm_failure_degrades_with_a_human_message(env):
+def test_llm_failure_degrades_with_a_human_message(env, capsys):
     gateway, store, sender, _ = env
     gateway._llm_client = FakeLLM(error=LLMError("连续 3 次未通过校验"))
     _seed_pending_file(store)
@@ -314,6 +314,8 @@ def test_llm_failure_degrades_with_a_human_message(env):
 
     assert sender.texts[1] == replies.PARSE_FAILED_GROUP
     assert "pending_file" not in store.load_state()
+    # 群里只有一句人话，病因留在 stderr（2026-09-17 真机卡点）
+    assert "连续 3 次未通过校验" in capsys.readouterr().err
 
 
 class _EmptyRubricLLM(FakeLLM):

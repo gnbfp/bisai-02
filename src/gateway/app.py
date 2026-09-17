@@ -467,7 +467,10 @@ class Gateway:
                 self._run_report(inbound, store)
         except ExtractError as exc:
             self._send(reply(inbound, replies.EXTRACT_REJECTED.format(reason=exc)))
-        except LLMError:
+        except LLMError as exc:
+            # 群里只回一句人话；**病因打在 stderr**（2026-09-17 真机：只看到「没解析出来」
+            # 时无从定位，逐次失败的原因由 LLMClient 的 [LLM] 行给出）
+            print(f"[M0] {_stamp()} LLM 失败（{kind}）：{exc}", file=sys.stderr)
             self._send(reply(inbound, replies.parse_failed(inbound.chat_type)))
         except Exception as exc:                      # 兜底也要说话
             self._send(

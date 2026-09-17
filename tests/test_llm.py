@@ -104,3 +104,33 @@ def test_request_uses_json_object_mode():
 
     _client(handler).chat_json("s", "u", lambda payload: payload)
     assert seen["response_format"] == {"type": "json_object"}
+
+
+# ---------- 真机诊断（2026-09-17）：失败原因必须留在 stderr ----------
+
+
+def test_failure_log_carries_attempt_reason_and_raw_output(capsys):
+    """群里只回一句人话，但 stderr 要能看到：第几次 / 为什么 / 模型原样返回。"""
+
+    def handler(request):
+        return _reply("still not json")
+
+    with pytest.raises(LLMError):
+        _client(handler).chat_json("s", "u", lambda payload: payload)
+
+    err = capsys.readouterr().err
+    assert "第 3/3 次未通过" in err        # 重试次数
+    assert "不是合法 JSON" in err          # 校验失败原因
+    assert "still not json" in err        # 模型返回原文
+
+
+def test_schema_reason_is_logged_on_every_attempt(capsys):
+    def parse(payload):
+        raise LLMOutputError("rubric[0](R1) 的 quote 不是作业书原文")
+
+    with pytest.raises(LLMError):
+        _client(lambda request: _reply('{"ok": 1}')).chat_json("s", "u", parse)
+
+    err = capsys.readouterr().err
+    assert "第 1/3 次未通过" in err
+    assert "quote 不是作业书原文" in err

@@ -7,6 +7,8 @@
   2. 出参过 schema 校验（由调用方传进来的 ``parse`` 负责）
   3. 校验失败重试，**最多 2 次**（``max_retries=2`` ⇒ 最多 3 次请求）
   4. 仍失败 → ``LLMError`` 抛出，由调用方**降级不猜**（M1/M3 报错给用户）
+  5. **每一次失败都往 stderr 打一行**：第几次 / 失败原因 / 模型返回原文（截断）——
+     上层只回一句人话（``app.py`` 的 ``except LLMError``），病因只在这行里；密钥不入日志
 
 本模块只负责"要一次合法 JSON"；它**不**判定业务对错（覆盖率高不高、
 评分点是否可拆）——那属于 ``coverage.py`` / ``decompose.py``（B8）。
@@ -15,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from dataclasses import dataclass, field
 from typing import Callable, TypeVar
@@ -34,6 +37,25 @@ def as_number(value):
         except ValueError:
             return value
     return value
+
+
+def _clip(value, limit: int = 300) -> str:
+    """日志用的单行截断：空白压成空格（一行一条，方便 rg），超长补省略号与总长。"""
+    text = " ".join(str(value).split())
+    return text if len(text) <= limit else f"{text[:limit]}…（共 {len(text)} 字）"
+
+
+def _log_failure(attempt: int, max_retries: int, reason: str, content: str | None) -> None:
+    """真机诊断（2026-09-17）：只回一句「没解析出来」等于没有病因。
+
+    校验失败原因 / 重试次数 / 模型返回原文三者一起进 stderr；上游只发人话。
+    """
+    print(
+        f"[LLM] {time.strftime('%Y-%m-%dT%H:%M:%S')} "
+        f"第 {attempt + 1}/{max_retries + 1} 次未通过：{_clip(reason)}"
+        f" | 模型原文：{'(无响应)' if content is None else _clip(content)}",
+        file=sys.stderr,
+    )
 
 
 class LLMError(RuntimeError):
@@ -97,6 +119,7 @@ class LLMClient:
                 reason = str(exc)
             except LLMError as exc:
                 reason = str(exc)
+            _log_failure(attempt, max_retries, reason, content)
             if attempt < max_retries:
                 if content is not None:
                     messages.append({"role": "assistant", "content": content})
