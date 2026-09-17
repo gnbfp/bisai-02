@@ -291,11 +291,11 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 | 7 | `登记` | **群** | — | 两步确认 → `members.json` | 现状不变 |
 | 8 | `报告` | **群 + 组长** | 花名册 + 分配 | 总表 + 清单 + 甘特图发群 | 现状不变 |
 | 9 | `我们要做的方向是：` | 群 | 有花名册（无花名册则同 §7 口径） | `direction.json` 覆盖 + 方向台账 | **U6 新增 · 已落地（v1.9）**（D-74） |
-| 10 | `改派 T3 @某人` | 群 + 组长 | 有分配 | `assignments.json` + `changes.json` | **U4 新增（PM 裁 A 方案，形态已定）** |
-| 11 | `我不做了 T3` | 私聊 | 本人是负责人 | 卡回流（`assignee=""`）+ 群公示 + 台账 | **U4 新增（PM 裁 A 方案，形态已定）** |
-| 12 | `我想接 T3` | 私聊 | 是花名册成员 | 认领 + 台账 + 群公示 | **U4 新增（PM 裁 A 方案，形态已定）** |
+| 10 | `改派 T3 @某人` | 群 + 组长 | 有分配 | `assignments.json` + `changes.json` | **已落地（v1.32，`e9608bf`；池卡形态 `2ce6997`）** |
+| 11 | `我不做了 T3` | 私聊 | 本人是负责人 | 卡回流（`assignee` 置空）+ 群公示 + 台账 | **已落地（v1.32，`ed75d2a`）** |
+| 12 | `我想接 T3` | 私聊 | 是花名册成员 | 认领 + 台账 + 群公示 | **已落地（v1.32，`f38b7b8`）** |
 
-**落地进度（v1.9）**：12 条里第 1–9 条**已落地**（现状 8 条 + U6 一条），第 10–12 条属 U4、排 9/17。口径是"**条数由前缀表按作用域派生**"（D-76）⇒ **当前派生值 = 路由 9 / 群 7 / 私聊 5**（`replies.COMMANDS` + `command_list()`，`tests/test_replies.py` 盯着）；"群 8 / 私聊 7 / 路由 12"是**U4 落地后的终值**，不是现状 —— 引用条数一律以**当次派生结果**为准。
+**落地进度（v1.32）**：12 条**全部落地** —— 第 1–9 条 v1.9 落地，第 10–12 条 U4 落地（`e9608bf` / `ed75d2a` / `f38b7b8` / `2ce6997`）⇒ **终值达成：路由 12 / 群 8 / 私聊 7**。口径不变（D-76）：条数仍**由前缀表按作用域派生**、不写死，引用时一律取**当次派生结果**。**v1.32 实测**（`replies.COMMANDS` + `command_list()`；`tests/test_replies.py::test_command_list_is_derived_from_the_scope_table` 盯着这条派生）= `len(COMMANDS)` **12** / `command_list(GROUP)` **8 行** / `command_list(DM)` **7 行**。**注**：`replies.py` 头部 docstring 仍写着「群 7 / 私聊 5」（U4 之前的值）—— 那是**过期注释**，不是口径，别拿它当条数依据。
 
 **两条硬约束（可写单测）**
 
@@ -315,7 +315,7 @@ D-30 的口径是「落盘只在仓库根 `data/` 下」，本轮却把升级版
 
 ### 5.4 未验证
 
-- [ ] **12 条**指令（**12 是终值**，「群内可用 8 / 私聊可用 7 / 路由表 12」同属终值 ⇒ **U6 落地后当前派生 = 路由 9 / 群 7 / 私聊 5**，见 §5.1 落地进度；其中"私聊专属"4 条 = `我想提议：` / `完成 T3` / `我不做了` / `我想接`）各一条实测记录（**开工后**；条数口径见 §5.1 表与 §12.3 第 15 条）
+- [ ] **12 条**指令各一条实测记录（**开工后**；条数口径见 §5.1 表与 §12.3 第 15 条）。**v1.32：条数已收敛到终值** —— 路由 **12** / 群 **8** / 私聊 **7**（实测见 §5.1 落地进度）。其中**私聊专属 4 条** = `我想提议：` / `完成 T3` / `我不做了 T3` / `我想接 T3`（**只作括注，不作条数** —— 私聊可用共 7 条，另 3 条是 `作业书` / `拆解` / `你想做哪一块` 的私聊侧）
 - [ ] 第 10–12 条的**措辞**待需求侧过一遍（A/B 之分已由 PM 裁决为 A，见 §8.1；只剩措辞）
 - [ ] `我们要做的方向是：X` 的回执样例 + `direction.json` 落盘样例（**开工后**）
 - [ ] 归并阈值（相似到什么程度算"同一个方向"）—— 需要一个可复核的阈值与 2 个正/反例
@@ -388,7 +388,7 @@ if not normal:        # 空列表 / 全是 ambiguous —— 都走无评分点�
 ### 6.6 其他落点
 
 - 工作量字段**复用现成的** `TaskCard.effort_hours`（地板 `EFFORT_HOURS_FLOOR = 0.5`，`src/models.py`）—— 不新增字段就能表达"工作量估算"。
-- LLM 调用点**从 3 处变 4 处**（新增无评分点拆解）：这是 §12 要登记的口径变更（B2 的"只用 3 处"被突破）。
+- LLM 调用点**从 3 处变 4 处**（新增无评分点拆解）：口径变更见 §12.3 第 2 条（PM 2026-09-15 批准；B2 的「只用 3 处」被突破）。**v1.32 登记落地状态**：3 处现状 = `src\intelligence\parse.py`（M1）/ `decompose.py`（M3）/ `direction.py`（M2），都走 `LLMClient.chat_json()`；第 4 处 = `src\intelligence\workload.py` —— **已落地**（地基 `6582827` + 接入 `1fc4e71`，与 `TaskCard.source_refs` / `tests\test_workload.py` 同批）。**接入已入库**：`_run_assignment()` 现在按 §6.1 分岔 —— `normal = [p for p in parsed.points if p.status == normal]`，`if not normal:` 走 `_run_workload()`（**不再回 `NO_RUBRIC_FOUND`**）；报告走 `render_workload_checklist()`，无评分点时的提示走 `replies.vote_no_rubric()`。**未验证**：无评分点作业书的**真机跑通**，以及 §6.2 红线（这条链路不调用 `coverage_loop()`）的**真机核对** —— 都归 9/18 彩排。
 - 估算呈现口径（L2）：一律"参考值、可调整"；报告抬头写"工作量估算（可改）"，不写"建议分配"。
 ## 7. 私聊归属（审核 6）
 ### 7.1 问题
@@ -455,7 +455,8 @@ if not normal:        # 空列表 / 全是 ambiguous —— 都走无评分点�
 - **写序**：先写 `changes.json`（意图日志，只追加），再写 `assignments.json`（状态）。崩溃夹在中间时，重放 `changes.json` 即可收敛 —— 台账是"意图"的真源。
 - **认领竞态**（两人同时 `我想接 T3`）：终局判据 = `assignee` 是否为空；读-改-写必须在**同一次** `mutate_many()` 里完成，先到者写入非空 `assignee`，后到者读到非空即回 §9.1 第 16 条那句。**串行口径（v1.8 收窄；原句"现网单进程串行收消息"过宽）**：串行只发生在**回调线程内** —— 后台 pipeline 线程（`handle()` 起的 `run_pipeline` 线程）与提醒扫描线程（`start_reminder_loop()` 里的 `_loop`）**也在写盘**，只是不写 `assignments.json`。`assignments.json` 的三个写者（M4 结算 / M6 完成标记 / U4 变更）**都在回调线程** ⇒ 交错是**时序**问题，不是并发问题。真正的交错点 = **结算与认领之间**（§8.4 的 `allocate()` 语义改动正是为这个）。
 - **待改点（v1.8，PM 2026-09-16 采纳）**：**结算也走 `mutate_many()` 条件写** —— 只改 `assignee` 为空的卡 / 只新增卡，不整份覆盖。`_save_assignments()`（`Gateway._save_assignments()`，docstring 自己写着"整份分配结果一次性覆盖"）是这条链上**唯一没有读-改-写保护**的地方。配套回归项见 §12.4 / §12.5 与 §13。**本轮（v1.9，U1 / U5 / U6）一个字都没动**：三条升级指令里只有 U6 落 `direction.json`，U1 / U5 不写 `assignments.json` ⇒ 这条待改点**仍是待改**（U4 的前置），**不要在 U4 之前依赖 `_save_assignments()` 的整份覆盖语义**。
-- 两条都**未验证**，见 §8.6。
+- **`source` 不动，真相记 `kind`（v1.32 追认，PM 2026-09-17）**：退出（`release()`）与认领（`claim()`）**只改 `assignee`** —— `AssignmentRecord.source`（D-20 的四值枚举）**一个字不动**。理由：回流 / 认领改的是「**谁做**」，不改「这张卡为什么存在」；§8.2 既没定义回流后的 `source` 取值，就**不臆想新枚举值**，真相记在台账的 `kind`（`reassign` / `release` / `claim`）里。**有意例外**：`reassign()` 把 `source` 翻成 `leader`（D-20 第四值）—— 「组长指派的」本身就是一种来源。存储层：`mutate_change()` 的 `source` 参数默认 `None` ⇒ **不传即不动**。单测 = `test_storage.py::test_release_sends_the_card_back_to_the_pool_and_keeps_the_source`（断言 `assignee` 清空而 `source` 仍是原值）。
+- 写序与认领竞态**都未验证**，见 §8.6。
 
 ### 8.3 回流池：不新增文件
 
@@ -484,11 +485,11 @@ if not normal:        # 空列表 / 全是 ambiguous —— 都走无评分点�
 
 ### 8.6 未验证
 
-- [ ] 换人 / 退出 / 加入 各一条完整流转记录（含台账落盘样例）—— **开工后**
-- [ ] **跨文件写序**的崩溃重放（`changes.json` → `assignments.json`）—— **开工后**：需要一个"写到一半中断"的注入演练
-- [ ] **认领竞态**：结算与 `我想接 T3` 交错时，卡不许落到两个人名下 —— **开工后**（与 §12.5 第 3 条同批）
-- [ ] "改派后重跑结算不丢人工修订"的回归用例 —— **开工后**
-- [ ] 群公示的形态与长度（属白名单播报，受 U5 的 ≤4 行约束）
+- [ ] 换人 / 退出 / 加入 各一条完整流转记录（含台账落盘样例）—— **v1.32：单测已过、真机样例未跑**。三条流转各有单测 = `test_gateway_app.py::test_a_change_lands_in_the_ledger_and_in_the_state`（换人）/ `test_released_card_goes_back_to_the_pool_and_is_announced`（退出）/ `test_gateway_router.py::test_a_member_can_claim_a_pool_card`（加入）；**「含台账落盘样例」指真机 `changes.json` 的实际样例，仍未跑**（归 9/18 彩排）
+- [ ] **跨文件写序**的崩溃重放（`changes.json` → `assignments.json`）—— **v1.32：写序有单测、崩溃重放仍缺**。写序 = `test_storage.py::test_mutate_change_writes_the_ledger_before_the_state`（断言写入顺序 = 台账先、状态后）；**「写到一半中断」的注入演练仍未做** —— `mutate_change()` 是**锁内两写**，两个文件之间**不是事务**（§8.2），中断夹在中间仍要靠重放台账收敛
+- [ ] **认领竞态**：结算与 `我想接 T3` 交错时，卡不许落到两个人名下 —— **v1.32：单测已过、真机未跑**。判据与写入同在锁内（`mutate_change()` 的 `expect_empty`）= `test_storage.py::test_mutate_change_refuses_a_card_someone_else_took`（后到者台账与状态一个字节都不写）+ 后到者拿到冲突那条 = `test_gateway_app.py::test_claim_then_the_loser_gets_the_conflict_line`；**真机两人同时敲未跑**
+- [x] **改派后重跑结算不丢人工修订」的回归用例 —— v1.32 单测已过**：`test_gateway_app.py::test_reassign_lands_in_the_ledger_and_survives_the_next_settlement`（= §8.4 裁决 + §12.4 的 U4 回归项，配 `3bb5bb3` 的「只改空负责人」条件写）
+- [ ] 群公示的形态与长度（属白名单播报，受 U5 的 ≤4 行约束）—— **v1.32：长度有单测、真机形态未看**。`test_replies.py::test_messages_stay_within_the_group_line_budget` 覆盖三条公示（`REASSIGN_DONE` / `RELEASE_ANNOUNCED` / `CLAIM_ANNOUNCED`，均 ≤4 行）；**真机上长什么样（人名长度、被 @ 的人怎么显示）仍未看**
 ## 9. 失败路径与降级话术（审核 8）
 ### 9.1 失败路径总表（行为 + 代码位置 + 升级后话术口径）
 | # | 失败 | 现状行为 / 代码位置 | 升级后行为 | 话术口径（自然语言 + 事实不润色） |
@@ -498,22 +499,33 @@ if not normal:        # 空列表 / 全是 ambiguous —— 都走无评分点�
 | 3 | **图片消息** | **无条件回** `IMAGE_REJECTED`（`route()` 的 `message_type == "image"` 分支；D-45 ①，用户 2026-09-12 拍板"不再静默"） | **群：静默**（本轮口径改写，见 §12.3 第 13 条）；**私聊：保留拒收回执** | 私聊话术沿用（已经是人话） |
 | 4 | `作业书` 但没文件 | `FILE_MISSING`（`router._pending_file()`：同会话 + 30 分钟 TTL，D-46 / D-47） | 同左 + 补一句"把作业书发进这个群，再 @我一次"（**v1.11 已落地**：群版走 `replies.file_missing(scope)`，真机日志见证据文件） | 保留"重试路径"，不要只说"没有" |
 | 5 | 文件解析失败 | `ExtractError` → `EXTRACT_REJECTED{reason}`；`LLMError` → `PARSE_FAILED`（`app.run_pipeline()` 的 except） | 同左，话术改自然语言 | `{reason}` 是事实槽位，原样输出 |
-| 6 | 全文没有评分标准 | `NO_RUBRIC_FOUND` 拒拆，**一个字都不落盘**（D-48 / D-49 ②） | **不再是失败**：改走工作量链路（U3，见 §6） | 状态变化要登记（§12） |
+| 6 | 全文没有评分标准 | `NO_RUBRIC_FOUND` 拒拆，**一个字都不落盘**（D-48 / D-49 ②） | **不再是失败**：改走工作量链路（U3，见 §6）—— **v1.32：已落地**（`6582827` 地基 + `1fc4e71` 接入，§6.1 的分岔已入库）；**无评分点的真机跑通归 9/18** | 状态变化要登记（§12） |
 | 7 | 私聊不知道是哪个群 | `NEED_GROUP`（"我还没认下群…"） | 同左（§7.2 的规则） | 沿用 |
 | 8 | 没人填志愿 | `settle()` → `allocate()` **兜底分配**（T08 要求，L6 保留） | 同左；**兜底后仍有剩余**才公示未分配清单 | 公示里逐张列卡号，不催人 |
 | 9 | LLM 超时 / 报错 | 分三条 except：`ExtractError` / `LLMError` / 其他（带 `type(exc).__name__`） | 分链路话术：M1/M3 与"工作量拆解"各一句；统一"没跑成 + 重试入口" | 不许把异常类名甩给用户（`（RuntimeError）` 这种要收进日志） |
 | 10 | 报告渲染失败 | `REPORT_FAILED`（`_run_report()` 的 `except`） | 同左 | 沿用但去掉公文腔 |
 | 11 | 图片发送失败 | `IMAGE_SEND_FAILED`（已写明"文字版先到，稍后补图"） | 同左 | 已经是人话，保留 |
 | 12 | 机器人掉线 | **无提示**（进程死即静默） | **不在本轮范围**（明确写下来，免被当成漏项） | — |
-| 13 | `改派 T3 @某人`：T3 不存在 / 不是本群的卡 | 无对应实现（U4 新指令） | 回"这个编号我没找到"+ 列出当前卡号（照 `PREFERENCE_BAD` 的形态）；**不落盘** | 列编号，不解释内部原因 |
-| 14 | `改派` / `我想接` 的目标**不在花名册** | 既有口径：非成员不给办事（`PREFERENCE_NOT_MEMBER` / `PROPOSAL_NOT_MEMBER`） | 沿用同一句人话 + 指路"先 `登记`" | **不静默**（与 D-61 ② 的静默场景不同） |
-| 15 | `我不做了 T3`：T3 不是你的 / 已回流 | 无对应实现（U4 新指令） | 回"T3 现在不在你名下"，**幂等**（不重复回流、不重复公示） | 不说"操作失败" |
-| 16 | `我想接 T3`：卡刚被别人接走（**认领竞态**） | 无对应实现（U4 新指令） | 回"T3 刚被 <人名> 接走了"+ 给剩余可认领卡（先到先得，D-52） | 人名是事实槽位，原样注入 |
-| 17 | `改派 T3 @自己` / `改派 T3 @当前负责人`（**无变化改派**） | 无对应实现（U4 新指令） | **幂等**：回"T3 现在就在你 / TA 名下，没改"——**不落盘、不公示**（没有变化就不产生台账条目）；**不静默**（组长的动作要有回执） | 不写"已改派"（没改），也不写"操作失败" |
+| 13 | `改派 T3 @某人`：T3 不存在 / 不是本群的卡 | **v1.32 已落地**（U4，`e9608bf`） | 回「这个编号我没找到」+ 列出当前卡号（照 `PREFERENCE_BAD` 的形态）；**不落盘** | 列编号，不解释内部原因 |
+| 14 | `改派` / `我想接` 的目标**不在花名册** | **v1.32 已落地**（U4，沿用既有口径） | 沿用同一句人话 + 指路「先 `登记`」（私聊侧 = `CLAIM_NOT_MEMBER`） | **不静默**（与 D-61 ② 的静默场景不同） |
+| 15 | `我不做了 T3`：T3 不是你的 / 已回流 | **v1.32 已落地**（U4，`ed75d2a`） | 回「T3 现在不在你名下」，**幂等**（不重复回流、不重复公示） | 不说「操作失败」 |
+| 16 | `我想接 T3`：卡刚被别人接走（**认领竞态**） | **v1.32 已落地**（U4，`f38b7b8`） | 回「T3 刚被 <人名> 接走了」+ 给剩余可认领卡（先到先得，D-52） | 人名是事实槽位，原样注入（查不到就回 `open_id`，见 §9.2） |
+| 17 | `改派 T3 @自己` / `改派 T3 @当前负责人`（**无变化改派**） | **v1.32 已落地**（U4，`e9608bf`） | **幂等**：回「T3 现在就在你 / TA 名下，没改」——**不落盘、不公示**（没有变化就不产生台账条目）；**不静默**（组长的动作要有回执） | 不写「已改派」（没改），也不写「操作失败」 |
 | 18 | `我们要做的方向是：`：正文为空 / 非组长改**已定**方向 | 无对应实现（U6 新指令） | 空正文 → 回提示（照 `PROPOSAL_EMPTY`）；非组长改已定方向 → 回"这得组长来定"，**不落盘、不覆盖** | 与 §5.3 两条硬口径同源 |
+
+**U4 落地落点（v1.32，第 13–17 条的文案名与测试名）**
+
+- 前置换语（不在第 13–17 条里，但同属 U4 的三条指令）：`REASSIGN_NEED_GROUP` / `REASSIGN_NEED_ROSTER` / `REASSIGN_NEED_LEADER` / `REASSIGN_FORM`（改派）、`RELEASE_NEED_DM` / `RELEASE_FORM`（退出）、`CLAIM_NEED_DM` / `CLAIM_FORM`（认领）—— 一律**只回话、不落盘**。
+- 第 13 条：文案 = `replies.reassign_unknown()`（列当前卡号）；单测 = `test_reassign_unknown_card_lists_the_current_ids` / `test_reassign_with_no_assignments_at_all_says_so`。
+- 第 14 条：文案 = `REASSIGN_NOT_MEMBER` / `CLAIM_NOT_MEMBER`（沿用 `PREFERENCE_NOT_MEMBER` 的人话 + 指路「登记」）；单测 = `test_reassign_to_a_stranger_is_not_silent` / `test_a_stranger_cannot_claim_but_is_not_ignored`。
+- 第 15 条：文案 = `RELEASE_NOT_YOURS`（成功回执 = `RELEASE_OK`）；单测 = `test_release_is_idempotent_and_never_says_it_failed`。
+- 第 16 条：文案 = `replies.claim_taken()`（人名走 `name_of()`）+ 锁内失配时的 `CLAIM_TAKEN` 兜底；单测 = `test_claiming_a_taken_card_names_the_winner` / `test_claim_then_the_loser_gets_the_conflict_line`。
+- 第 17 条：文案 = `REASSIGN_NOOP` / `CLAIM_ALREADY`；单测 = `test_a_reassign_that_changes_nothing_writes_nothing`（router）/ `test_mutate_change_is_a_no_op_when_the_owner_is_unchanged`（storage）/ `test_reassigning_the_card_to_the_leader_himself_says_you`。
+- **仍未验**：这 5 条的**真机话术样例**（归 9/18 彩排）；第 16 条的**真并发**（两人同时敲）只有单测。
 ### 9.2 两条纪律（与 U5 同源）
 
 - **事实槽位不润色**：`{name}` `{reason}` `{task_id}` `{at}` `{deadline}` `{hours}` 及飞书 @ 语法 `<at user_id="ou_x"></at>`（`REMIND_DUE` / `REMIND_OVERDUE`，D-66 ⑤）都必须原样注入。
+- **查不到人就不编人名（v1.32 追认，PM 2026-09-17）**：公示与回执里的人名一律走 `change.name_of(roster, open_id)` —— 查得到就用 `member.name`，**查不到就原样回 `open_id`**（代码注释原文：宁可不润色，也不编一个人名）；**不许 LLM 补名、不许写「某位同学」**。落点四处 = `RELEASE_ANNOUNCED` / `CLAIM_ANNOUNCED` / `REASSIGN_DONE` / `claim_taken()`；**真机样例（成员 / 非成员各一条）仍归 9/18**。
 - **降级也要说话**：不允许"静默失败"（现状 `run_pipeline()` 已经把这条写进 docstring；升级后新增的工作量链路必须遵守）。
 
 ### 9.3 未验证
@@ -576,17 +588,17 @@ if not normal:        # 空列表 / 全是 ambiguous —— 都走无评分点�
 python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本（纯 AST，不进运行时）
 ```
 
-最近一次输出（2026-09-16，本机实测）：
+最近一次输出（2026-09-17 v1.32；**快照绑提交 = `1fc4e71`**，免得再漂）：
 
 ```
 [count_replies] src/gateway/replies.py
-  all   = 78   (= len(__all__))
-  text  = 73   (字符串字面量 69 + 非字面量模板 4 ['COMMANDS', 'COMMAND_LIST_DM', 'COMMAND_LIST_TEXT', 'REGISTER_FORM_BAD'])
-  sym   = 5    ['Command', 'command_list', 'file_missing', 'needs_rubric', 'parse_failed']
-  lines = 326
+  all   = 108  (= len(__all__))
+  text  = 99   (字符串字面量 95 + 非字面量模板 4 ['COMMANDS', 'COMMAND_LIST_DM', 'COMMAND_LIST_TEXT', 'REGISTER_FORM_BAD'])
+  sym   = 9    ['Command', 'claim_taken', 'claim_unknown', 'command_list', 'file_missing', 'needs_rubric', 'parse_failed', 'reassign_unknown', 'vote_no_rubric']
+  lines = 440
 ```
 
-口径注记：`all = text + sym`（78 = 73 + 5）；**"路由"不是作用域**，它是 `len(COMMANDS)` = 9；`command_list(scope)` 返回的是**文本**，别拿 `len()` 当条数（要数就用 `usable_in()`）。
+口径注记：`all = text + sym`（108 = 99 + 9）；**「路由」不是作用域**，它是 `len(COMMANDS)` = **12**（群 8 / 私聊 7）；`command_list(scope)` 返回的是**文本**，别拿 `len()` 当条数（要数就用 `usable_in()`）。**漂移史（别再手抄）**：U4 落地时（`2ce6997`）= 106 / 98 / 8 / 427；U3 接入落地后（`1fc4e71`）= **108 / 99 / 9 / 440**（新增 `vote_no_rubric`）。**每次改 `replies.py` 都重跑上面那条命令、改写这一格。**
 
 典型"机器语言 / 公文腔"三例（都是现状）：
 
@@ -688,6 +700,7 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 | **U2 落地（v1.27，2026-09-17）** | **已落地，一笔 = `21fd34a`**：两段式工作空间（`index.json` + `user_last_group` 单值映射 + 按群目录 `workspaces\<群标识>\`）、**④-c** = 按人 `NEED_GROUP`（判据从「全局 `group_chat_id` 空」改成「**该人无绑定**」）且**覆盖全部**依赖归属的私聊指令（不只 `我想提议：` 一条）、`state.group_chat_id` **停写 + 只读兼容**、进程根只留 `index.json` + `workspaces\`。**这笔同时落了 ④-a 与 ④-c 两个处置项，而提交信息只写了 ④-a** —— PM 2026-09-17 点出的**标注缺口**：后面 grep `21fd34a` 的人必须知道 ④-c 也在这笔里，别做重复劳动。**复跑** = `python -m pytest -q --basetemp=<可写目录>` ⇒ **456 passed**（`--basetemp` 是沙箱 / ACL 坑：默认 `%TEMP%\pytest-of-<用户>` 会 `PermissionError` 一片假红，**不是代码问题**）。**真机三槽已跑**（`86055e2` / `docs\evidence\2026-09-17-u2-acceptance.md`，2026-09-16 20:04–20:18）⇒ §7.4 与 `docs\ACCEPTANCE-U2.md` 已勾；**遗留** = §5 的 T05 格、§2 的按人补测 |
 | **U4 兜底（时间不够按这条砍）** | 只保**换人**一种变更类型（退出 / 加入顺延 P1）；台账与群公示仍留 —— 与 `requirements-upgrade.md` §5 的"9/18 只保换人"同一口径 |
 | **U4 回归项（v1.8）** | 结算改走 `mutate_many()` **条件写**（只改空负责人 / 只新增卡），`_save_assignments()` 的**整份覆盖列为待改点**（§8.2）；回归 = **改派后重跑结算不丢人工修订** |
+| **U4 落地（v1.32，2026-09-17）** | **已落地，六笔** = `090e78a`（变更台账 `ChangeRecord` + `mutate_change()` 锁内两写：台账先于状态）→ `3bb5bb3`（结算改条件写 + `allocate()` 固定已分配）→ `e9608bf`（改派）→ `ed75d2a`（退出回流）→ `f38b7b8`（补位认领）→ `2ce6997`（回流池渲染成「待认领」）。**复跑** = `python -m pytest -q --basetemp=<可写目录>` ⇒ **518 passed**（U2 时点 456 ⇒ 净增 62；其后 U3 落地（`6582827` 地基 + `1fc4e71` 接入）⇒ 复跑 = **523 passed**）。**真机样例（`changes.json` / 群公示）未跑** —— §8.6 的五格已逐格判定，**没有一格因为「代码写了」就翻通过** |
 | **U2 追加（v1.19，PM 2026-09-16 裁）** | 回退锁守卫：`rollback()` 补 `check_process_lock()`（与 `migrate()` 同口径，约 5 行）⇒ 进程在跑时 `--rollback` **同款拒绝 `exit=4`**（`EXIT_LOCKED`）。**回归**：进程在跑时跑 `--rollback` ⇒ `exit=4` 且**不动盘**（与迁移那条同款单测）。**落地前现状 = 回退不查锁** —— 手册 `docs\OPERATIONS-U2.md` §1 / §7 / §8 按现状写，落地后同步改口。**不加干跑档**：PM 裁定「假跑不解决敲错，锁守卫解决真事故」 |
 | **U1 门禁线收尾（v1.24；口径由架构师定，PM 2026-09-16 授权）—— 已落地（v1.26，`aa742c0`）** | `方向` 开窗入口加**花名册成员判据**：判点 = `vote.command()` 的 `known` 段（`roster.members` 的 open_id 集合），非成员 ⇒ 回 `replies.DIRECTION_NOT_MEMBER`、**不开窗**；`roster` 为空 ⇒ 谁都算数（沿用 `_proposal()` 的兜底）。**理由**：`我想提议：` 查名册、`方向` 不查 ⇒ 同一条「群内发起」能力两种口径；run5 实测过**外人开全组投票窗**。**回归（已过）**：`test_a_stranger_cannot_open_the_window` / `test_a_stranger_cannot_touch_a_running_window` / `test_a_stranger_in_private_learns_they_are_not_on_the_roster`。**演示不受影响**：§10.1 第 5 步由**组长**发，而 `register._confirm()` 硬约束 `leader ∈ members`。**排期**：9/17 补丁批 ①（不挂 U2）。 |
 | 9/18 | 彩排（**含 §10.1 第 7 步 U6 拍板、第 13 步 U4 回流认领**）+ T01–T13 全量回归。**不依赖 U2 / U4 的那部分已拆成清单** `docs\REHEARSAL-0918.md`（§4.6 三格 + §9.1 的 18 条话术样例，本批实做 10 条），**依赖 U2 / U4 的留槽位标「待落定」**；本批**不碰 `data-upgrade\workspaces\`** |
@@ -700,7 +713,8 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 
 - [ ] 回归执行记录表（含 6 处口径改写的理由（T01 / T05 / T11 + 群内图片静默 / 私聊不反问 / 改派确认形态））—— **9/18 前**
 - [ ] 12.3 里 10 条"需 PM"项：**已于 2026-09-15 全部裁决并回写 §12.1 / §12.3 / §12.4**（编号 2/3/4/5/8/11/13/14/15/16）；**未认 1 条**：第 1 条（数据根写法，待前置负责人）；第 17 条（防呆收窄）PM 2026-09-16 **已认**（三条件见 §3.2 / §12.4）
-- [ ] 第 7 条（`allocate()` 语义变更）的回归用例：改派后重跑结算，卡不许回到原负责人
+- [x] **第 7 条（`allocate()` 语义变更）的回归用例 —— v1.32 单测已过**：改派后重跑结算，卡不许回到原负责人 = `tests\test_gateway_app.py::test_reassign_lands_in_the_ledger_and_survives_the_next_settlement`（配 `3bb5bb3` 的「只改空负责人」条件写）；**真机未跑**
+- [x] **U3（无评分点链路）—— 已落地（v1.32，`6582827` 地基 + `1fc4e71` 接入）**：`TaskCard.source_refs` + `src\intelligence\workload.py` + `tests\test_workload.py`（地基），以及 §6.1 分岔 / `_run_workload()` / `render_workload_checklist()` / `vote_no_rubric()`（接入）**全部入库**；**LLM 调用点 3 → 4 已打通**（见 §6.6）。**仍未验**：无评分点作业书的**真机跑通**与 §6.2 红线的真机核对 —— 归 9/18 彩排
 - [x] **单测已过（v1.9）**：净增 **36** 条（**分文件实测**，`3efe36f` → HEAD）—— `tests/test_gateway_router.py` **+13**（含 T05"投完立即恢复门禁"；其中 4 条钉的是资源分支、不是门禁穿透）、`tests/test_vote.py` **+12**（U6）、`tests/test_gateway_events.py` **+4**（@ 识别）、`tests/test_replies.py` **+7**（话术与清单派生的机械判据）⇒ §4.6 / §9.3 / §11.5 的对应项降级为"**单测已过、真机未测**"
 - [ ] **真机实测**（§4.6 的 ≥6 条穿透 + §9.3 的 18 条话术样例）—— **9/18 彩排**；单测替代不了"平台上 @ 到底长什么样"这条证据
 - [x] **穿透批整批闭环（v1.25）**：§4.6 全部格（含 ④ **非成员半格**）+ D-45 ① 子格全绿，run1–run5 五轮留痕 —— 证据 = `docs\evidence\2026-09-16-u2-preflight-penetration.md`（§3 逐条判定 + §2.1–§2.3 原样日志 + §7 子格 + §8 摘/还原哈希）。**仍未验的只剩**「`方向` 开窗成员判据」「回退锁守卫」「`ACCEPTANCE-U2` 全表」—— 三条都在等落地，不是缺证据。
@@ -711,7 +725,7 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 
 - [x] **U2 落地（v1.27，`21fd34a`，④-a + ④-c 同一笔）**：`src/storage.py`（`INDEX` / `WORKSPACES` / `safe_key()` / `workspace_dir()` / `JsonStore.ensure_root_dirs()`）+ 新增 `src/gateway/workspace.py`（归属唯一实现）+ `app.py` 的 `handle()` 选数据域 + `router._proposal()` 收 `group_chat_id` + `tools/migrate_workspace.py` 的 `safe_key` 改同源。复跑 = `python -m pytest -q --basetemp=<可写目录>` ⇒ **456 passed**（上一笔 446，净增 10 = 新文件 `tests/test_workspace.py` **6** + `tests/test_gateway_app.py` **净增 4**，其中 2 处是改名）；`tests/test_migrate_workspace.py` 现集到 **18** 条（v1.12 的 17 + 回退锁守卫 1）。**单测 + 真机都已过**：`docs\ACCEPTANCE-U2.md` §1–§5 一轮全过（`86055e2` / `docs\evidence\2026-09-17-u2-acceptance.md`）—— 遗留 = §5 的 T05 格未测、§2 只跑了 2 条指令（按人补测）。
 
-- [ ] **随 U3 / U4 落地的回填（PM 2026-09-17 定，待做）**：U3（无评分点链路）/ U4（任务变更）落地后**一次性回填** §5.4 / §7.2 / §9 / §11 / §12 / §13 —— 落点 = 无评分点链路的失败话术与计数（§9.1 第 6 条 / §11.5）、任务变更的 5 条失败话术（§9.1 第 13–17 条）、路由表的 U4 终值（§5.1 / §5.4）、私聊归属的遗留（§7.2）、排期与分工（§12.4 / §12.5 / §13）。**落地前不预写**。
+- [ ] **随 U3 / U4 落地的回填（v1.30 定）—— U4 部分已结项（v1.32）**：**U4 已回填** = §5.1 / §5.4（终值 12 / 8 / 7）、§8.2（两条追认口径）、§8.6（5 格逐格判定）、§9.1 第 13–17 条、§9.2、§11.1、§12.3 / §12.4 / §12.5、§13。**U3 的代码侧也已回填（v1.32）**：§6.6（4/4 调用点已打通）、§9.1 第 6 条（翻已落地）、§11.1（计数刷到 `1fc4e71`）—— **只剩 §11.5 的对照表与真机样例**（归 9/18）。
 
 ---
 
@@ -722,14 +736,14 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 | 2 | 架构师 | **部分已填**（形态 + 实测证据；欠"两真实进程同时在线"与"日志分文件"） |
 | 3 | 架构师 | **已填 + 已实测**（迁移/回退演练 + 覆盖率逐项一致；"0→0"已标注无证据力、补"未覆盖"行；欠并发/中断/磁盘三项；**v1.7 补 §3.6 只读诊断 + §3.3 多会话守卫**；迁移工具与手册**未做**，排 9/17 上午） |
 | 4 | 架构师 + 需求侧 | **已填（v1.5 修订）**：门禁作用域"只拦群聊文本" + **补私聊豁免**；矩阵补图片/其他资源列、**填死"志愿窗口 × 群内裸数字"格**；修两处交叉引用。**v1.9：U1 已落地** —— `may_speak()` + 资源分支在门禁之前 + 群内文件静默缓存（11 条单测）；矩阵的**真机实测**留 9/18 |
-| 5 | 架构师 + 需求侧 | **已填**（路由表 + 优先级 + 方向拍板）；**v1.9：U6 已落地**（`我们要做的方向是：`），条数改按**派生值**引用（当前路由 9 / 群 7 / 私聊 5；12 是 U4 落地后的终值）；第 10–12 条**措辞待需求侧过一遍** |
+| 5 | 架构师 + 需求侧 | **已填**（路由表 + 优先级 + 方向拍板）；**v1.9：U6 已落地**；**v1.32：U4 已落地 ⇒ 条数到终值（路由 12 / 群 8 / 私聊 7，实测见 §5.1）**；第 10–12 条的措辞已随 U4 文案一起定稿（`REASSIGN_*` / `RELEASE_*` / `CLAIM_*` 一族） |
 | 6 | 架构师 | **已填**（分支点 / 双链路 / 字段变更 / 混合裁决；**PM 已拍板，总开关统一为"≥1 条 `normal`"**） |
 | 7 | 架构师 | **已填**（单值映射规则 + 不需要反问的理由 + 未验证项） |
-| 8 | 架构师 | **已填**（变更类型 / 台账 / 回流 / 兜底关系；**PM 已裁 A 方案**） |
-| 9 | 架构师 | **已填**（失败路径 **18** 条 = 12 + U4/U6 补 6 条；两条纪律）；**v1.9：U6 第 18 条已落地**，话术机械判据有单测（`tests/test_replies.py`），18 条样例与真机实测留 9/18 |
+| 8 | 架构师 | **已填**（变更类型 / 台账 / 回流 / 兜底关系；**PM 已裁 A 方案**）；**v1.32：U4 已落地（六笔）**，§8.6 五格已逐格判定，**两条追认口径已登记**（§8.2 的 `source` 不动 / 真相记 `kind`） |
+| 9 | 架构师 | **已填**（失败路径 **18** 条 = 12 + U4/U6 补 6 条；两条纪律）；**v1.9：U6 第 18 条已落地**；**v1.32：U4 第 13–17 条已落地** —— 文案名与测试名落在 §9.1 表后那段；**§9.2 补第三条纪律：查不到人就不编人名（回 `open_id`）**；话术机械判据有单测（`tests/test_replies.py`），18 条样例与真机实测留 9/18 |
 | 10 | 架构师 + 需求侧 | **已填**（13 步脚本 + 无 LLM 保底；彩排留 9/18） |
 | 11 | 架构师 | **已填**（四层规则 + 两个例外 + 三个交付物）；**v1.9：`replies.py` 整份改写**（61 → 72 条），清单条数改派生（群 7 / 私聊 5）；对照表与盲评留 9/18 |
-| 12 | 架构师 + 需求侧 | **已填（v1.5 增补至 16 条口径，v1.6 补第 17/18 条）**；其中 10 条"需 PM"项**已于 2026-09-15 全部裁决并回写**；**未认 1 条**：第 1 条（数据根写法，待前置负责人）；第 17 条（防呆收窄）PM 2026-09-16 **已认**（三条件见 §3.2 / §12.4） |
+| 12 | 架构师 + 需求侧 | **已填（v1.5 增补至 16 条口径，v1.6 补第 17/18 条）**；其中 10 条「需 PM」项**已于 2026-09-15 全部裁决并回写**；**未认 1 条**：第 1 条（数据根写法，待前置负责人）；第 17 条（防呆收窄）PM 2026-09-16 **已认**（三条件见 §3.2 / §12.4）；**v1.32：第 2 条（LLM 3→4）已落地 —— `6582827`（地基）+ `1fc4e71`（接入），见 §6.6；第 13–17 条（U4）已落地** |
 | U4 / U6 时间槽 | 架构师 | **已补（v1.6，§12.4）**：U6 挂在 9/16 下午 U1 段尾；U4 最小集在 9/17；降级 = 只保"换人"（= 审核 #12 不通过的唯一原因） |
 | 补丁：`tools\migrate_workspace.py` | **开发**（v1.10 定） | **工具已落地（v1.12）**：幂等 + `Resolve-Path` 守卫 + `MANIFEST` + **17 条**回归（变异验证 3/3 被咬住），自测演练 = 干跑 → 迁移 → 复跑（写盘 0）→ 回退，见 §12.4 与 `docs\evidence\2026-09-16-migrate-workspace-tool-rehearsal.md`。**"重跑演练"那一半仍归架构师，「写了但没验」的口径不变** —— 本行只清掉"写"这一半；**PM 2026-09-16 裁的 3 条已落地**（`migrated_from` 记仓库相对路径 / `created_at` 写明"登记时刻"并要写进手册 / 回退摘悬挂绑定保持），见证据文件 §12 |
 | 补丁：离线操作手册 `docs\OPERATIONS-U2.md` | **架构师**（v1.10 定；含"重跑演练 + `MANIFEST`"验收口径） | **已交付（v1.13，2026-09-16）**：`docs\OPERATIONS-U2.md`；含清空 / 重置 / 改名 + 执行人记录（`data-upgrade\maintenance.log`）+ 验收口径「重跑演练 + `MANIFEST`」（架构师 2026-09-16 已复跑一次）—— U2 防呆收窄的三条件（PM 2026-09-16 认） |
@@ -756,7 +770,9 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 | U2 落地（v1.27，2026-09-17） | 开发 | **已落地，一笔 = `21fd34a`（④-a + ④-c 同一笔；提交信息只写了 ④-a ⇒ PM 2026-09-17 记为「标注缺口」）**：**④-a** 两段式工作空间 + **④-c** 按人 `NEED_GROUP`（判据 = 「该人无绑定」，覆盖全部依赖归属的私聊指令）+ `state.group_chat_id` 停写 + 进程根只留 `index.json` + `workspaces\`；`pytest` **456 passed**（复跑命令与 `--basetemp` 环境坑见 §12.4 / §12.5）。**真机三槽已跑**（`86055e2` / `docs\evidence\2026-09-17-u2-acceptance.md`）⇒ §7.4 与 `docs\ACCEPTANCE-U2.md` 已勾 |
 | §3.5 / §7.2 / §7.4 / §12 的 U2 回填（v1.27） | 架构师 | **已回填（2026-09-17）**：§3.5（`group_chat_id` 停写 + 只读）、§7.2（归属唯一实现 + 调用点）、§7.4（三槽拆「单测已过 / 真机未跑」两层）、§12.4 / §12.5（落地登记）；`docs\ACCEPTANCE-U2.md` 头部与 §4 / §5 同步。**v1.29 起这四节已按真机验收再订正一遍**（§7.4 三槽翻 `[x]`）；**仍未验的见 v1.29 ⑥** |
 | 文案台账：@ 门禁同族缺陷（v1.29） | 架构师（登记）/ 开发（实修） | **已登记（2026-09-17，来源 = 真机验收 `docs\evidence\2026-09-17-u2-acceptance.md` §8.1）**：群里「教用户回某个词」的话**必须自带 @我**，否则被自己的 @ 门禁吃掉（真机复现）。**已修 4 处（U1）** = `command_list` 第 1 条 + `file_missing()` / `parse_failed()` / `needs_rubric()`。**同族未修 8 处**（符号锚；行号按本材料纪律不写，见证据 §8.1）：`VOTE_NEED_ROSTER` / `DIRECTION_NOT_MEMBER` / `COMPLETE_NEED_ASSIGNMENTS` / `REPORT_NEED_ROSTER` / `REPORT_NEED_ASSIGNMENTS` / `PREFERENCE_NEED_ROSTER` / `PREFERENCE_NOT_MEMBER` / `PROPOSAL_NOT_MEMBER`；另有 `command_list(GROUP)` 的**第 2–7 条**（`group_line` 只有「作业书」一条带 @）。**修法** = 照 `file_missing()` 的 scope 分叉。**处置（PM 2026-09-16）：先不改、先记台账** —— 与 U3 / U4 的文案一次收（现在改会牵动 §11 对照表 + 计数快照 + 再复跑一轮）。**同证据 §8.2 的反例**：`NEED_GROUP` **不在清单里、别顺手改** —— 它教「先在群里发一次指令」，而绑定刷新在门禁**之前**（对齐卡 #3）⇒ 静默发也照样认下这个群 |
-| 随 U3 / U4 落地的回填（待做，PM 2026-09-17 定） | 架构师 | **待做**：U3 / U4 落地后一次性回填 **§5.4 / §7.2 / §9 / §11 / §12 / §13**（无评分点链路的话术与计数、任务变更的 5 条失败话术、路由表 U4 终值、私聊归属遗留、排期与分工）。**落地前不预写**；9/18 彩排先跑出证据（`docs\REHEARSAL-0918.md` 的格 D / 格 E） |
+| U4 落地（v1.32，2026-09-17） | 开发 | **已落地，六笔** = `090e78a` / `3bb5bb3` / `e9608bf` / `ed75d2a` / `f38b7b8` / `2ce6997`；`pytest` **518 passed**（v1.32 本机复跑；U2 时点 456 ⇒ 净增 62；U3 落地（`6582827` + `1fc4e71`）后 = **523 passed**）。**真机留痕（`changes.json` 样例 / 群公示形态）仍未跑**，归 9/18 彩排 |
+| 追认两条口径（v1.32，PM 2026-09-17） | 架构师（登记） | **已登记**：① **退出 / 认领后 `AssignmentRecord.source` 不动、真相记台账 `kind`**（落 §8.2；`reassign` 翻 `leader` 是有意例外；`mutate_change()` 的 `source` 默认 `None`）② **公示人名查不到就回 `open_id`、不编**（落 §9.2；实现 = `change.name_of()`）。证据 = `docs\evidence\2026-09-17-u4-landing-crosscheck.md` |
+| 随 U3 / U4 落地的回填（v1.30 定；**v1.32 部分结项**） | 架构师 | **U4 部分已回填（v1.32）**：§5.1 / §5.4（终值 12 / 8 / 7）、§8.2（两条追认口径）、§8.6（5 格逐格判定）、§9.1 第 13–17 条、§9.2、§11.1、§12.3 / §12.4 / §12.5、§13。**U3 部分仍待**：等 `workload.py` 从「在途」变「已落地」，再回填 §6.6 / §9.1 第 6 条 / §11.5 的计数（无评分点链路的话术与计数）—— **落地前不预写** |
 ## 14. 送审与判定
 
 1. 材料填完 → 我按 §0 + `requirements-upgrade.md` §8 的 12 条逐项审。
@@ -959,3 +975,12 @@ python tools\count_replies.py    # 架构师 2026-09-16 落的只读计数脚本
 >   - ② **改法**：换成 `Start-Process … -RedirectStandardOutput $out -RedirectStandardError $err`（stdout / stderr 分两份带时间戳的文件），记录人 `Get-Content -LiteralPath $out -Wait -Encoding UTF8` 跟随。
 >   - ③ **两条硬规则进 §0**：**别用 `Tee-Object`**；**`recv` / `-> ok` 在 stdout（`.out.log`）、启动横幅在 stderr（`.err.log`）⇒ 判证据只看 `.out.log`**。（§0 原有的「原始日志不许覆盖」保留，编号变成硬规则 ③。）
 >   - ④ **连带订正**：清单头部「记录人必须盯着网关窗口的 stdout」→「盯着 §0 那份 `.out.log`」——`Start-Process -WindowStyle Hidden` 之后**没有窗口可盯**。
+> - 2026-09-17 **v1.32（U4 落地回填 + 追认两条口径 + U3 的 LLM 调用点登记）**：
+>   - ① **§5.1 / §5.4：条数到终值** —— 第 10–12 条翻「已落地」，落地进度整段重写为 **路由 12 / 群 8 / 私聊 7**（v1.32 实测：`len(COMMANDS)` 12 / `command_list(GROUP)` 8 行 / `command_list(DM)` 7 行）。**「私聊专属 4」只作括注**，不再当条数用；`replies.py` 头部那句「群 7 / 私聊 5」已标为**过期注释**。
+>   - ② **§8.6 五格逐格判定**（不许整段翻通过）：换人 / 退出 / 加入的流转 = **单测已过、真机样例未跑**；跨文件写序 = **写序有单测、崩溃重放仍缺**（`mutate_change()` 是锁内两写，两个文件之间不是事务）；认领竞态 = **单测已过、真机未跑**；改派后重跑结算不丢人工修订 = **`[x]` 单测已过**；群公示形态与长度 = **长度有单测、真机形态未看**。全部附单测名。
+>   - ③ **§9.1 第 13–17 条翻「已落地」**，并在表后补一段「文案名 + 测试名」落点（含不在 13–17 里的前置换语文案 `REASSIGN_NEED_*` / `RELEASE_*` / `CLAIM_*`）。
+>   - ④ **追认两条口径（PM 2026-09-17）**：**① `source` 不动、真相记台账 `kind`** —— 落 §8.2；单测 = `test_release_sends_the_card_back_to_the_pool_and_keeps_the_source`（断言 `assignee` 清空而 `source` 保留）；`reassign` 翻 `leader` 是**有意例外**；`mutate_change()` 的 `source` 参数默认 `None` ⇒ 不传即不动。**② 公示人名查不到就回 `open_id`、不编** —— 落 §9.2；实现 = `change.name_of()`（注释原文「宁可不润色，也不编一个人名」）。
+>   - ⑤ **§6.6 / §9.1 第 6 条 / §12.3 第 2 条 / §12.5：U3 已落地** —— 地基 `6582827`（`TaskCard.source_refs` + `src\intelligence\workload.py` + `tests\test_workload.py`）+ 接入 `1fc4e71`（§6.1 分岔 / `_run_workload()` / `render_workload_checklist()` / `vote_no_rubric()`）⇒ **LLM 调用点 3 → 4 已打通**，§6.1 那行不再是死路。**仍未验 = 真机跑通。**
+>   - ⑥ **§11.1 数字快照刷新**（U4 改了 `replies.py`）：`all 106 / text 98 / sym 8 / lines 427`（原写 78 / 73 / 5 / 326），且**快照绑提交 `2ce6997`**；口径注记里的 `len(COMMANDS)` 9 → **12**。U3 接入落地后（`1fc4e71`）**已改写为 108 / 99 / 9 / 440**（新增 `vote_no_rubric`）。
+>   - ⑦ **§13 / §12.4 / §12.5 回填**：新增 U4 落地行（六笔 + `pytest` **518 passed**，U2 时点 456 ⇒ 净增 62）与两条口径追认行；§12.5 的「随 U3 / U4 落地的回填」**U4 与 U3 的代码侧都已结项**（只剩 §11.5 对照表与真机样例）；第 7 条（`allocate()` 语义变更）的回归用例翻 `[x]`。
+>   - ⑧ **仍未验**（不许当通过）：§8.6 的真机样例与崩溃重放、§9.1 第 13–17 条的真机话术、第 16 条的真并发、U3 的真机跑通、`changes.json` 与群公示的真机留痕。
