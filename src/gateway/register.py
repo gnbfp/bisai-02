@@ -163,18 +163,32 @@ def _collect(
         # 手打名字但一个 @ 都没有：D-34 只认 @ 结构里的 open_id，给最直白的提示
         return _stay(inbound, replies.REGISTER_FORM_BAD)
 
-    leader = _distinct(_mentions_in(_section(text, r"组长\s*[:：](.*)"), inbound.mentions))
-    members = _distinct(_mentions_in(_section(text, r"组员\s*[:：](.*)"), inbound.mentions))
+    # 判据 = **others**（非组长、非机器人的 distinct），不是「组员行原始 @ 条数」（§9.1 第 19 条）：
+    # 真机 2026-09-17 10:48:58「组长：@A」+「组员：@A@B」—— 同一个 open_id 在一条消息里 @ 两次
+    # 会拿到两个占位符 ⇒ 旧判据按原始 2 条放行，落盘只剩 1 个组员（**判据与落盘不同源**）。
+    # `is_bot` 一律先过滤：@ 到机器人自己不算「组员」。
+    group_lines = r"组长\s*[:：](.*)"
+    member_lines = r"组员\s*[:：](.*)"
+    leader = [
+        m
+        for m in _distinct(_mentions_in(_section(text, group_lines), inbound.mentions))
+        if not m.is_bot
+    ]
+    members = [
+        m
+        for m in _distinct(_mentions_in(_section(text, member_lines), inbound.mentions))
+        if not m.is_bot
+    ]
 
     if any(not m.open_id for m in (*leader, *members)):
         return _stay(inbound, replies.REGISTER_FORM_BAD)
     if len(leader) != 1:
         return _stay(inbound, replies.REGISTER_NEED_LEADER)
-    if len(members) < 2:
-        return _stay(inbound, replies.REGISTER_NEED_MEMBERS)
-
     leader_mention = leader[0]
+    # 组长被写进「组员」行不算组员；阈值仍是 2（PM 2026-09-17 拍）
     others = [m for m in members if m.open_id != leader_mention.open_id]
+    if len(others) < 2:
+        return _stay(inbound, replies.REGISTER_NEED_MEMBERS)
     expires_at = _iso((now or datetime.now()) + REGISTER_TTL)
     new_block = {
         "stage": "confirm",

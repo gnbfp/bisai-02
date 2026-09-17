@@ -93,6 +93,37 @@ def test_collect_needs_at_least_two_members():
     assert outcome.replies[0].text == replies.REGISTER_NEED_MEMBERS
 
 
+def test_collect_counts_distinct_others_not_raw_mentions():
+    """§9.1 第 19 条：判据 = others（非组长、非机器人的 distinct），不是原始 @ 条数。
+
+    真机 2026-09-17 10:48:58：同一条消息「组长：@A」+「组员：@A@B」—— 同一个 open_id
+    被 @ 两次会拿到两个占位符，旧判据按原始 2 条放行，落盘却只剩 1 个组员。
+    """
+    state = register_begin(_inbound("登记"), {}, NOW).state
+    text = "组长：@_user_1\n组员：@_user_1 @_user_2"
+    mentions = (
+        Mention(key="@_user_1", open_id="ou_zhang", name="张三"),
+        Mention(key="@_user_2", open_id="ou_zhang", name="张三"),   # 同一个人，另一个占位符
+    )
+    outcome = register_step(text, _inbound(text, mentions), state, NOW)
+    assert outcome.replies[0].text == replies.REGISTER_NEED_MEMBERS
+    assert outcome.state is None                     # 不落盘
+
+
+def test_collect_ignores_the_bot_in_the_member_line():
+    """＠ 到机器人自己不算「组员」（is_bot 先过滤）。"""
+    state = register_begin(_inbound("登记"), {}, NOW).state
+    text = "组长：@_user_1\n组员：@_user_2 @_user_3"
+    mentions = (
+        Mention(key="@_user_1", open_id="ou_zhang", name="张三"),
+        Mention(key="@_user_2", open_id="ou_li", name="李四"),
+        Mention(key="@_user_3", open_id="ou_bot", name="机器人", is_bot=True),
+    )
+    outcome = register_step(text, _inbound(text, mentions), state, NOW)
+    assert outcome.replies[0].text == replies.REGISTER_NEED_MEMBERS
+    assert outcome.state is None
+
+
 def test_confirm_agree_produces_roster_payload():
     state = register_begin(_inbound("登记"), {}, NOW).state
     state = register_step(FORM, _inbound(FORM, _mentions()), state, NOW).state
